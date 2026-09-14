@@ -1,0 +1,7 @@
+node_modules
+dist
+.git
+.env
+*.bat
+README_VPS_WINDOWS.md
+.telegram_sent_cache.json

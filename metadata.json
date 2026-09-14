@@ -1,0 +1,8 @@
+{
+  "name": "Crypto Trade Analyzer",
+  "description": "منظومة التداول اليومي الذكية (Intraday Only) للعملات الرقمية - التقاط مباشر لحركة شموع OKX (4H, 1H, 15M, 5M)، محدد المسار اليومي 50 EMA ومستويات جان الكبرى، ومصفوفة التوافق المؤسسي ومزامنة صفقات التداول مع Turso.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
