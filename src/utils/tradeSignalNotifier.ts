@@ -19,12 +19,12 @@ const STORAGE_KEY = 'v9_notified_trade_signals_registry';
 // مدة بقاء الإشعار نشطاً في الذاكرة التراكمية (12 ساعة افتراضياً)
 const SIGNAL_EXPIRY_MS = 12 * 60 * 60 * 1000;
 
-// الحد الأدنى للمهلة الزمنية الصارمة بين تنبيهين متتاليين لنفس الصفقة والعملة (30 دقيقة لتقليل الإزعاج)
-export const DEFAULT_SIGNAL_COOLDOWN_MS = 30 * 60 * 1000; // 30 دقيقة = 1800000 ميلي ثانية
+// الحد الأدنى للمهلة الزمنية الصارمة بين تنبيهين متتاليين لنفس الصفقة والعملة (60 دقيقة لمنع التكرار نهائياً)
+export const DEFAULT_SIGNAL_COOLDOWN_MS = 60 * 60 * 1000; // 60 دقيقة = 3,600,000 ميلي ثانية
 
 class TradeSignalNotificationManager {
   private inMemoryRegistry: Map<string, NotifiedSignalRecord> = new Map();
-  // مهلة منع التكرار بالملي ثانية (30 دقيقة افتراضياً)
+  // مهلة منع التكرار بالملي ثانية (60 دقيقة افتراضياً)
   private cooldownMs: number = DEFAULT_SIGNAL_COOLDOWN_MS;
 
   constructor() {

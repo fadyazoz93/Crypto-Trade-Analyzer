@@ -1,6 +1,7 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import fs from 'fs';
 import path from 'path';
+import { getTursoClient } from './turso';
 
 const DEFAULT_BOT_TOKEN = '8747938142:AAFlRuWm8OpUxVENCMpsWl6rJNfk6yQ6JJc';
 const DEFAULT_CHAT_ID = '-1004454999923';
@@ -79,8 +80,8 @@ async function getBotInfo(): Promise<{ ok: boolean; bot?: any; error?: string }>
   }
 }
 
-// مهلة منع التكرار الصارمة: 45 دقيقة لنفس العملة والصفقة لمنع أي رسائل مكررة
-export const SERVER_DEDUP_WINDOW_MS = 45 * 60 * 1000; // 45 دقيقة = 2,700,000 ميلي ثانية
+// مهلة منع التكرار الصارمة: 60 دقيقة لنفس العملة والصفقة لمنع أي رسائل مكررة نهائياً
+export const SERVER_DEDUP_WINDOW_MS = 60 * 60 * 1000; // 60 دقيقة = 3,600,000 ميلي ثانية
 
 // Persistent Cross-Process Disk Cache:
 // يحفظ سجل الإشارات المرسلة على القرص لمنع التكرار حتى لو تم فتح أكثر من نافذة CMD أو حدثت إعادة تشغيل
@@ -235,6 +236,27 @@ export async function sendTelegramSignalDirect(payload: DirectSignalPayload): Pr
     };
   }
 
+  // حماية صارمة: منع إرسال العملات الوهمية أو التجريبية (TEST) إلى القناة العامة
+  if (normalizedSymbol.includes('TEST')) {
+    console.log(`[Telegram Blocked] Test symbol ${normalizedSymbol} absorbed silently without sending to channel.`);
+    return {
+      success: true,
+      message: 'Test symbol processed locally without dispatching to live Telegram channel.',
+    };
+  }
+
+  // حماية إدارية: رفض أي إشارة غير مكتملة الأركان (تفتقر إلى وقف الخسارة SL أو الهدف TP)
+  const finalTpCheck = takeProfit4 || takeProfit || (payload as any).take_profit_4 || (payload as any).take_profit || takeProfit2 || takeProfit1;
+  if (!stopLoss || !finalTpCheck) {
+    console.log(`[Telegram Blocked] Signal for ${normalizedSymbol} rejected: Incomplete trade setup (missing SL or TP).`);
+    return {
+      success: false,
+      blocked: true,
+      message: `Signal for ${normalizedSymbol} rejected: Incomplete trade setup (missing SL or TP).`,
+      error: 'Signal must have valid Stop Loss and Take Profit levels.',
+    };
+  }
+
   const now = Date.now();
   const memSentAt = serverSentSignalsCache.get(cacheKey) || 0;
   const diskCache = loadPersistentDiskCache();
@@ -251,7 +273,7 @@ export async function sendTelegramSignalDirect(payload: DirectSignalPayload): Pr
     };
   }
 
-  // 2. منع التكرار الزمني الشامل (عبر جميع العمليات ونوافذ CMD السيرفر المتزامنة)
+  // 2. منع التكرار الزمني الشامل محلياً (ذاكرة العملية + القرص الصلب)
   if (!force && lastSentAt > 0 && (now - lastSentAt < SERVER_DEDUP_WINDOW_MS)) {
     const elapsedMinutes = Math.floor((now - lastSentAt) / 60000);
     console.log(`[Telegram Deduplication] Signal for ${normalizedSymbol} (${decision}) was already sent ${elapsedMinutes}m ago. Skipping duplicate across all windows/processes.`);
@@ -260,6 +282,62 @@ export async function sendTelegramSignalDirect(payload: DirectSignalPayload): Pr
       duplicate: true,
       message: `Signal for ${normalizedSymbol} was already dispatched ${elapsedMinutes} minutes ago (deduplicated).`,
     };
+  }
+
+  // 3. منع التكرار السحابي الموحد عبر قاعدة بيانات Turso المشتركة (Cluster-wide Atomic Lease)
+  // يضمن حجب التكرار قطعياً حتى لو كان هناك أكثر من سيرفر أو حاوية كونتینر أو متصفحات متزامنة
+  const tursoClient = getTursoClient();
+  if (tursoClient && !force) {
+    try {
+      const tursoRes = await tursoClient.execute({
+        sql: `
+          INSERT INTO telegram_dispatches (cache_key, symbol, decision, entry_price, stop_loss, take_profit, dispatched_at, source)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+          ON CONFLICT(cache_key) DO UPDATE SET
+            entry_price = excluded.entry_price,
+            stop_loss = excluded.stop_loss,
+            take_profit = excluded.take_profit,
+            dispatched_at = excluded.dispatched_at,
+            source = excluded.source
+          WHERE (? - telegram_dispatches.dispatched_at) >= ?;
+        `,
+        args: [
+          cacheKey,
+          normalizedSymbol,
+          decision,
+          Number(entryPrice ?? price) || null,
+          Number(stopLoss) || null,
+          Number(takeProfit || takeProfit4 || takeProfit1) || null,
+          now,
+          source || 'SERVER_DAEMON',
+          now,
+          SERVER_DEDUP_WINDOW_MS,
+        ],
+      });
+
+      if (tursoRes.rowsAffected === 0) {
+        // حجز الإشارة مرفوض سحابياً لأن حاوية أخرى أو عملية أخرى أرسلتها مؤخراً
+        const queryRes = await tursoClient.execute({
+          sql: `SELECT dispatched_at, source FROM telegram_dispatches WHERE cache_key = ? LIMIT 1`,
+          args: [cacheKey],
+        });
+        const lastSent = Number(queryRes.rows[0]?.dispatched_at || 0);
+        const origin = String(queryRes.rows[0]?.source || 'another_instance');
+        const elapsedMinutes = Math.max(0, Math.floor((now - lastSent) / 60000));
+        console.log(
+          `[Turso Cluster Dedup] 🛑 Signal for ${normalizedSymbol} (${decision}) was already dispatched ${elapsedMinutes}m ago by ${origin}. BLOCKED across all cluster containers.`
+        );
+        serverSentSignalsCache.set(cacheKey, lastSent);
+        savePersistentDiskCache(cacheKey, lastSent);
+        return {
+          success: true,
+          duplicate: true,
+          message: `Signal for ${normalizedSymbol} was already dispatched ${elapsedMinutes} minutes ago (cluster deduplicated).`,
+        };
+      }
+    } catch (tursoErr) {
+      console.warn('[Turso Cluster Dedup Warning] Proceeding with local guards:', tursoErr);
+    }
   }
 
   // قفل المفتاح فوراً في الذاكرة وعلى القرص الثابت قبل إرسال الرسالة عبر الشبكة
@@ -341,9 +419,15 @@ ${executionTypeLine}
     if (result.ok) {
       return { success: true, message: 'Signal dispatched to Telegram' };
     } else {
-      // في حالة فشل الإرسال الشبكي، نحذف من الكاش للسماح بالمحاولة مرة أخرى
+      // في حالة فشل الإرسال الشبكي، نحذف من الكاش وقاعدة البيانات للسماح بالمحاولة مرة أخرى
       serverSentSignalsCache.delete(cacheKey);
       removeFromDiskCache(cacheKey);
+      if (tursoClient) {
+        tursoClient.execute({
+          sql: `DELETE FROM telegram_dispatches WHERE cache_key = ? AND dispatched_at = ?`,
+          args: [cacheKey, now],
+        }).catch(() => {});
+      }
       return { success: false, error: result.error };
     }
   } finally {

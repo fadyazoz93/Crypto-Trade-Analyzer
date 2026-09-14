@@ -27,6 +27,8 @@ export interface TelegramSignalData {
   binancePrice?: number;
 }
 
+const clientInFlightDispatches = new Set<string>();
+
 export async function sendTelegramSignal(data: TelegramSignalData): Promise<boolean> {
   // فحص صارم ومطلق: السماح بإرسال إشارات التوافق المؤسسي العالي (4/5 و 5/5)
   if (data.sopScore !== undefined && data.sopScore !== null && Number(data.sopScore) < 4) {
@@ -34,11 +36,29 @@ export async function sendTelegramSignal(data: TelegramSignalData): Promise<bool
     return false;
   }
 
-  // فحص صارم: منع إرسال إشعار تليجرام لنفس العملة والصفقة أكثر من مرة
+  const cleanSym = String(data.symbol || '').replace(/[-_ /]/g, '').trim().toUpperCase();
+  const cleanKey = `${cleanSym}_${data.decision}`;
+
+  // فحص صارم: منع التكرار اللحظي والمستمر على مستوى المتصفح
   if (!data.force) {
+    if (clientInFlightDispatches.has(cleanKey)) {
+      return false;
+    }
     if (signalNotificationManager.hasBeenNotified(data.symbol, data.decision, 'TELEGRAM')) {
       return false;
     }
+  }
+
+  // قفل فوري متفائل لمنع أي استدعاءات متوازية من المؤشرات والشموع
+  if (!data.force) {
+    clientInFlightDispatches.add(cleanKey);
+    signalNotificationManager.markAsNotified(
+      data.symbol,
+      data.decision,
+      'TELEGRAM',
+      data.entryPrice,
+      data.stopLoss
+    );
   }
 
   try {
@@ -52,27 +72,29 @@ export async function sendTelegramSignal(data: TelegramSignalData): Promise<bool
 
     if (!res.ok) {
       console.warn('Failed to dispatch telegram signal:', res.statusText);
+      if (!data.force) {
+        signalNotificationManager.clearSignalForSymbol(data.symbol);
+      }
       return false;
     }
 
     const result = await res.json();
     const success = Boolean(result?.success);
 
-    if (success && !data.force) {
-      // تسجيل أن الإشعار أرسل بنجاح لحظر تكراره
-      signalNotificationManager.markAsNotified(
-        data.symbol,
-        data.decision,
-        'TELEGRAM',
-        data.entryPrice,
-        data.stopLoss
-      );
+    if (!success && !data.force) {
+      // إذا فشل الإرسال نلغي القفل
+      signalNotificationManager.clearSignalForSymbol(data.symbol);
     }
 
     return success;
   } catch (err) {
     console.error('Error sending Telegram notification:', err);
+    if (!data.force) {
+      signalNotificationManager.clearSignalForSymbol(data.symbol);
+    }
     return false;
+  } finally {
+    clientInFlightDispatches.delete(cleanKey);
   }
 }
 

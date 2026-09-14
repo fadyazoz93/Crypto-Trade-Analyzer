@@ -169,6 +169,20 @@ export async function initTursoTables(client: Client) {
       );
     `);
 
+    // 6. Global Telegram signal dispatches table (Cluster-wide deduplication)
+    await client.execute(`
+      CREATE TABLE IF NOT EXISTS telegram_dispatches (
+        cache_key TEXT PRIMARY KEY,
+        symbol TEXT NOT NULL,
+        decision TEXT NOT NULL,
+        entry_price REAL,
+        stop_loss REAL,
+        take_profit REAL,
+        dispatched_at INTEGER NOT NULL,
+        source TEXT
+      );
+    `);
+
     tablesInitialized = true;
     console.log('Turso tables initialized successfully on AWS EU-West-1.');
   } catch (err) {
