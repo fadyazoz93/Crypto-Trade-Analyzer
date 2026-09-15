@@ -1391,9 +1391,10 @@ export async function analyzeIntradayMarketData(symbol: string): Promise<Analysi
   const bb_bandwidth_1h_arr = calcBollingerBandwidth(bb_1h.upper, bb_1h.lower, bb_1h.sma);
   const bb_bandwidth_1h = bb_bandwidth_1h_arr[bb_bandwidth_1h_arr.length - 1] || 2.0;
 
-  // 1.b متوسط 50 على فريم الساعة (1H 50 EMA Guard)
+  // 1.b متوسط 50 و 200 على فريم الساعة (1H 50 EMA & 1H 200 EMA Guard)
   const ema50_1h_arr = calcEMA(data1h.closes, 50);
   const ema50_1h = ema50_1h_arr[ema50_1h_arr.length - 1];
+  const ema200_1h_val = ema200_1h_arr[ema200_1h_arr.length - 1];
 
   // 1.c كشف القمم والقيعان البارزة على 1H (Swing High/Low Detection)
   const swingsH1 = getLatestSwings(
@@ -1412,6 +1413,11 @@ export async function analyzeIntradayMarketData(symbol: string): Promise<Analysi
   const pivot_4h = calcPivots(data4h.highs[prevBar4H], data4h.lows[prevBar4H], data4h.closes[prevBar4H]);
 
   // 3. مؤشرات 15M
+  const ema200_15m_arr = calcEMA(data15m.closes, 200);
+  const ema200_15m = ema200_15m_arr[ema200_15m_arr.length - 1];
+  const ema50_15m_arr = calcEMA(data15m.closes, 50);
+  const ema50_15m = ema50_15m_arr[ema50_15m_arr.length - 1];
+
   const rsi_15m_arr = calcRSI(data15m.closes, 14);
   const rsi_15m = rsi_15m_arr[rsi_15m_arr.length - 1];
 
@@ -1507,13 +1513,21 @@ export async function analyzeIntradayMarketData(symbol: string): Promise<Analysi
   const is4hBullish = price > ema200_4h && slopeHealth4h.isHealthy && slopeHealth4h.directionOk;
   const is4hBearish = price < ema200_4h && slopeHealth4h.isHealthy && slopeHealth4h.directionOk;
 
-  const isMacroTrendPassed = (targetDir === 'BUY' && is4hBullish) || (targetDir === 'SELL' && is4hBearish);
+  // التحقق من توافق مسار الأطر الزمنية المتعددة مع متوسط 200 (4H + 1H + 15M)
+  // لمنع فتح شراء أسفل 200 EMA أو بيع أعلى 200 EMA
+  const is15mBullishAlignment = price >= (ema200_15m * 0.9985);
+  const is15mBearishAlignment = price <= (ema200_15m * 1.0015);
+  const is1hBullishAlignment = price >= (ema200_1h_val * 0.997);
+  const is1hBearishAlignment = price <= (ema200_1h_val * 1.003);
+
+  const isMacroTrendPassed = (targetDir === 'BUY' && is4hBullish && is15mBullishAlignment && is1hBullishAlignment) 
+    || (targetDir === 'SELL' && is4hBearish && is15mBearishAlignment && is1hBearishAlignment);
   const macroTrendScore = isMacroTrendPassed ? 20 : 0;
 
   const macroTrendItem: ConfluenceItem = {
     category: 'MACRO_TREND',
-    name: 'SOP 1: 4H Trend & 200 EMA Slope Gatekeeper',
-    nameAr: 'البوابة 1: اتجاه وميل 200 EMA على إطار 4H',
+    name: 'SOP 1: 4H Trend & Multi-TF 200 EMA Gatekeeper',
+    nameAr: 'البوابة 1: اتجاه وميل 200 EMA على 4H وتوافق 1H و 15M',
     gateNumber: 1,
     score: macroTrendScore,
     maxScore: 20,
@@ -1521,12 +1535,12 @@ export async function analyzeIntradayMarketData(symbol: string): Promise<Analysi
     timeframe: '4H',
     description: isMacroTrendPassed
       ? (targetDir === 'BUY'
-          ? `مسار 4H صاعد متوافق مع محدد الاتجاه اليومي: السعر ($${price.toFixed(price < 1 ? 6 : 2)}) أعلى 200 EMA على 4H بميل صاعد صحي (+${slopeHealth4h.slopePoints} pts)`
-          : `مسار 4H هابط متوافق مع محدد الاتجاه اليومي: السعر ($${price.toFixed(price < 1 ? 6 : 2)}) أسفل 200 EMA على 4H بميل هابط صحي (-${slopeHealth4h.slopePoints} pts)`)
+          ? `مسار 4H صاعد متوافق مع محدد الاتجاه اليومي ومتوسطات 200 (4H/1H/15M): السعر ($${price.toFixed(price < 1 ? 6 : 2)}) أعلى 200 EMA بميل صاعد صحي (+${slopeHealth4h.slopePoints} pts)`
+          : `مسار 4H هابط متوافق مع محدد الاتجاه اليومي ومتوسطات 200 (4H/1H/15M): السعر ($${price.toFixed(price < 1 ? 6 : 2)}) أسفل 200 EMA بميل هابط صحي (-${slopeHealth4h.slopePoints} pts)`)
       : (slopeHealth4h.isHealthy
-          ? `السعر محصور على إطار 4H أو غير متطابق مع اتجاه 200 EMA (${targetDir === 'BUY' ? 'مطلوب أعلى 200 EMA' : 'مطلوب أسفل 200 EMA'})`
+          ? `السعر محصور أو غير متوافق مع متوسط 200 EMA على الأطر الزمنية (${targetDir === 'BUY' ? 'مطلوب أعلى 200 EMA على 4H و 15M' : 'مطلوب أسفل 200 EMA على 4H و 15M'})`
           : `ميل 200 EMA على 4H ضعيف أو مسطح (${slopeHealth4h.slopePoints} pts < ${settings.minEmaSlopePoints || 2.0} pts المطلوب)`),
-    details: `4H Close: $${h4Close.toFixed(price < 1 ? 4 : 2)} | 4H 200 EMA: $${ema200_4h.toFixed(price < 1 ? 4 : 2)} | ميل 4H: ${slopeHealth4h.directionOk ? 'سليم ↗️' : 'غير متطابق ↘️'} (${slopeHealth4h.slopePoints} pts) | المسار اليومي المصرح: ${dailyMacroBias.allowedDirection === 'BUY_ONLY' ? 'شراء فقط (Long)' : 'بيع فقط (Short)'}`,
+    details: `4H Close: $${h4Close.toFixed(price < 1 ? 4 : 2)} | 4H 200 EMA: $${ema200_4h.toFixed(price < 1 ? 4 : 2)} | 1H 200 EMA: $${ema200_1h_val.toFixed(price < 1 ? 4 : 2)} | 15M 200 EMA: $${ema200_15m.toFixed(price < 1 ? 4 : 2)} | ميل 4H: ${slopeHealth4h.directionOk ? 'سليم ↗️' : 'غير متطابق ↘️'} (${slopeHealth4h.slopePoints} pts) | المسار اليومي المصرح: ${dailyMacroBias.allowedDirection === 'BUY_ONLY' ? 'شراء فقط (Long)' : 'بيع فقط (Short)'}`,
   };
 
   // 2. SOP 2: Multi-Cycle Square of 9 Confluence (20 Points)
@@ -1867,6 +1881,42 @@ export async function analyzeIntradayMarketData(symbol: string): Promise<Analysi
     singleTpCalculated = effectiveEntryPrice - 2.0 * riskDist;
   }
 
+  // ----------------------------------------------------
+  // Dynamic Target Capping: الحفاظ على واقعية الهدف وعدم تجاوزه للمقاومات الكبرى أو متوسطات 200
+  // (Cap target before major resistances/200 EMAs with 0.3% buffer)
+  // ----------------------------------------------------
+  if (targetDir === 'BUY') {
+    const potentialCeilings: number[] = [];
+    if (ema200_15m > effectiveEntryPrice) potentialCeilings.push(ema200_15m * 0.997);
+    if (ema200_1h_val > effectiveEntryPrice) potentialCeilings.push(ema200_1h_val * 0.997);
+    if (ema200_4h > effectiveEntryPrice) potentialCeilings.push(ema200_4h * 0.997);
+    if (dailyMacroBias.prevDailyHigh > effectiveEntryPrice) potentialCeilings.push(dailyMacroBias.prevDailyHigh * 0.997);
+
+    if (potentialCeilings.length > 0) {
+      const lowestCeiling = Math.min(...potentialCeilings);
+      // إذا كان سقف المقاومة يعطي على الأقل 1.2R، نجعل الهدف قبل المقاومة لضمان التحقق
+      if (lowestCeiling > effectiveEntryPrice + (1.2 * riskDist) && lowestCeiling < singleTpCalculated) {
+        singleTpCalculated = lowestCeiling;
+        targetAngleName = 'هدف متوافق أسفل المقاومة الكبرى (Safe Ceiling Target)';
+      }
+    }
+  } else if (targetDir === 'SELL') {
+    const potentialFloors: number[] = [];
+    if (ema200_15m < effectiveEntryPrice) potentialFloors.push(ema200_15m * 1.003);
+    if (ema200_1h_val < effectiveEntryPrice) potentialFloors.push(ema200_1h_val * 1.003);
+    if (ema200_4h < effectiveEntryPrice) potentialFloors.push(ema200_4h * 1.003);
+    if (dailyMacroBias.prevDailyLow < effectiveEntryPrice) potentialFloors.push(dailyMacroBias.prevDailyLow * 1.003);
+
+    if (potentialFloors.length > 0) {
+      const highestFloor = Math.max(...potentialFloors);
+      // إذا كانت أرضية الدعم تعطي على الأقل 1.2R، نجعل الهدف قبل الدعم لضمان التحقق
+      if (highestFloor < effectiveEntryPrice - (1.2 * riskDist) && highestFloor > singleTpCalculated) {
+        singleTpCalculated = highestFloor;
+        targetAngleName = 'هدف متوافق أعلى الدعم الكلي (Safe Floor Target)';
+      }
+    }
+  }
+
   const calculatedRR = Math.abs(singleTpCalculated - effectiveEntryPrice) / riskDist;
   const rrRatioString = '1:2 (Quad Exit Scale-Out)';
 
@@ -2086,6 +2136,38 @@ export async function analyzeIntradayMarketData(symbol: string): Promise<Analysi
       decision = 'NO_TRADE';
       rejected_at_step = 'Daily Support Floor (أرضية قاع الأمس - PDL)';
       reason = `⚠️ تم تجنب البيع (Daily Support Floor Guard): السعر الحالي ($${price.toFixed(price < 1 ? 6 : 2)}) يلامس مباشرة أرضية قاع الأمس (PDL: $${dailyMacroBias.prevDailyLow.toFixed(price < 1 ? 6 : 2)}) كنقطة دعم قصوى، تجنباً للارتداد الصاعد ومصائد السيولة عند القاع.`;
+    }
+  }
+
+  // 2. فلتر حاجز متوسط 200 EMA الديناميكي (200 EMA Resistance/Support Ceiling Guard)
+  // يمنع نهائياً الشراء إذا كان السعر أسفل 200 EMA على 15M أو 1H أو 4H، أو إذا كانت المسافة للمقاومة أقل من 0.4%
+  if (decision === 'BUY') {
+    if (price < ema200_15m) {
+      decision = 'NO_TRADE';
+      rejected_at_step = '15M 200 EMA Resistance Ceiling (مقاومة 200 EMA على 15M)';
+      reason = `⚠️ تم حجب الشراء (EMA Resistance Ceiling): السعر الحالي ($${price.toFixed(price < 1 ? 6 : 2)}) يتداول أسفل متوسط 200 EMA على فريم 15M ($${ema200_15m.toFixed(price < 1 ? 4 : 2)})، ولا يُسمح بفتح مراكز شراء أسفل مقاومة 200 EMA.`;
+    } else if (price < ema200_1h_val) {
+      decision = 'NO_TRADE';
+      rejected_at_step = '1H 200 EMA Resistance Ceiling (مقاومة 200 EMA على 1H)';
+      reason = `⚠️ تم حجب الشراء (EMA Resistance Ceiling): السعر الحالي ($${price.toFixed(price < 1 ? 6 : 2)}) يتداول أسفل متوسط 200 EMA على فريم الساعة ($${ema200_1h_val.toFixed(price < 1 ? 4 : 2)})، مما يمثل جدار مقاومة مباشر.`;
+    } else if (price < ema200_4h) {
+      decision = 'NO_TRADE';
+      rejected_at_step = '4H 200 EMA Macro Resistance Ceiling (مقاومة 200 EMA على 4H)';
+      reason = `⚠️ تم حجب الشراء (EMA Resistance Ceiling): السعر الحالي ($${price.toFixed(price < 1 ? 6 : 2)}) يتداول أسفل متوسط 200 EMA الكلي على 4H ($${ema200_4h.toFixed(price < 1 ? 4 : 2)}).`;
+    }
+  } else if (decision === 'SELL') {
+    if (price > ema200_15m) {
+      decision = 'NO_TRADE';
+      rejected_at_step = '15M 200 EMA Support Floor (دعم 200 EMA على 15M)';
+      reason = `⚠️ تم حجب البيع (EMA Support Floor): السعر الحالي ($${price.toFixed(price < 1 ? 6 : 2)}) يتداول أعلى متوسط 200 EMA على فريم 15M ($${ema200_15m.toFixed(price < 1 ? 4 : 2)})، ولا يُسمح بفتح مراكز بيع أعلى دعم 200 EMA.`;
+    } else if (price > ema200_1h_val) {
+      decision = 'NO_TRADE';
+      rejected_at_step = '1H 200 EMA Support Floor (دعم 200 EMA على 1H)';
+      reason = `⚠️ تم حجب البيع (EMA Support Floor): السعر الحالي ($${price.toFixed(price < 1 ? 6 : 2)}) يتداول أعلى متوسط 200 EMA على فريم الساعة ($${ema200_1h_val.toFixed(price < 1 ? 4 : 2)})، مما يمثل أرضية دعم صاعدة.`;
+    } else if (price > ema200_4h) {
+      decision = 'NO_TRADE';
+      rejected_at_step = '4H 200 EMA Macro Support Floor (دعم 200 EMA على 4H)';
+      reason = `⚠️ تم حجب البيع (EMA Support Floor): السعر الحالي ($${price.toFixed(price < 1 ? 6 : 2)}) يتداول أعلى متوسط 200 EMA الكلي على 4H ($${ema200_4h.toFixed(price < 1 ? 4 : 2)}).`;
     }
   }
 

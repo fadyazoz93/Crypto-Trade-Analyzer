@@ -140,6 +140,26 @@ export function normalizeSymbolKey(sym: string): string {
     .replace(/[-_ /]/g, '');
 }
 
+export function formatNumberVal(val: number | string | undefined | null): string {
+  if (val === undefined || val === null || val === '') return 'غير محدد';
+  if (typeof val === 'string') {
+    const cleaned = val.replace(/^\$/, '').trim();
+    const parsed = Number(cleaned);
+    if (!isNaN(parsed)) val = parsed;
+    else return val.startsWith('$') ? val : `$${val}`;
+  }
+  const num = Number(val);
+  if (isNaN(num)) return String(val);
+  if (num < 1 && num > 0) {
+    return `$${num.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 6 })}`;
+  }
+  if (Number.isInteger(num)) {
+    return `$${num}`;
+  }
+  const str = num.toFixed(4).replace(/\.?0+$/, '');
+  return `$${str}`;
+}
+
 export interface DirectSignalPayload {
   symbol?: string;
   decision?: 'BUY' | 'SELL';
@@ -349,26 +369,6 @@ export async function sendTelegramSignalDirect(payload: DirectSignalPayload): Pr
     const isBuy = decision === 'BUY';
     const header = isBuy ? '📈 🟢 إشارة شراء مؤكدة (BUY)' : '📉 🔴 إشارة بيع مؤكدة (SELL)';
 
-    const formatNumberVal = (val: number | string | undefined | null) => {
-      if (val === undefined || val === null || val === '') return 'غير محدد';
-      if (typeof val === 'string') {
-        const cleaned = val.replace(/^\$/, '').trim();
-        const parsed = Number(cleaned);
-        if (!isNaN(parsed)) val = parsed;
-        else return val.startsWith('$') ? val : `$${val}`;
-      }
-      const num = Number(val);
-      if (isNaN(num)) return String(val);
-      if (num < 1 && num > 0) {
-        return `$${num.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 6 })}`;
-      }
-      if (Number.isInteger(num)) {
-        return `$${num}`;
-      }
-      const str = num.toFixed(4).replace(/\.?0+$/, '');
-      return `$${str}`;
-    };
-
     const numPrice = Number(price);
     const numEntry = Number(entryPrice ?? price);
     const formattedPrice = formatNumberVal(price);
@@ -435,6 +435,89 @@ ${executionTypeLine}
   }
 }
 
+export interface TrailingStopUpdatePayload {
+  symbol: string;
+  decision: 'BUY' | 'SELL';
+  currentPrice: number;
+  entryPrice: number;
+  oldStopLoss: number;
+  newStopLoss: number;
+  targetHitName?: string; // e.g. "TP1 (+0.5R)" أو "TP2 (+1.0R)"
+  stage: 'BREAKEVEN' | 'TRAILING_LOCK';
+  reason?: string;
+  binancePrice?: number;
+}
+
+/**
+ * إرسال إشعار تليجرام عند تعديل وقف الخسارة (Stop Trailing / Move SL to Entry or Profit)
+ */
+export async function sendTelegramTrailingStopUpdate(payload: TrailingStopUpdatePayload): Promise<{ success: boolean; error?: string }> {
+  try {
+    const {
+      symbol,
+      decision,
+      currentPrice,
+      entryPrice,
+      oldStopLoss,
+      newStopLoss,
+      targetHitName = 'تحقيق هدف جزئي',
+      stage,
+      reason,
+      binancePrice,
+    } = payload;
+
+    const normalizedSymbol = normalizeSymbolKey(symbol);
+    const isBuy = decision === 'BUY';
+
+    let parallelBinancePrice = binancePrice;
+    if (parallelBinancePrice === undefined || parallelBinancePrice === null) {
+      parallelBinancePrice = await fetchBinanceTickerPrice(normalizedSymbol) ?? undefined;
+    }
+
+    const formattedCurPrice = formatNumberVal(currentPrice);
+    const formattedEntry = formatNumberVal(entryPrice);
+    const formattedOldSl = formatNumberVal(oldStopLoss);
+    const formattedNewSl = formatNumberVal(newStopLoss);
+    const parallelBinanceVal = (parallelBinancePrice && parallelBinancePrice > 0)
+      ? formatNumberVal(parallelBinancePrice)
+      : formattedCurPrice;
+
+    const actionHeader = stage === 'BREAKEVEN'
+      ? `🛡️ <b>تحديث أمان: نقل وقف الخسارة لنقطة الدخول (Breakeven)</b>`
+      : `🚀 <b>تحديث أرباح: حجز الأرباح ورفع الوقف (Stop Trailing)</b>`;
+
+    const statusBadge = isBuy ? `🟢 شراء (LONG)` : `🔴 بيع (SHORT)`;
+
+    const profitPct = isBuy
+      ? (((currentPrice - entryPrice) / entryPrice) * 100).toFixed(2)
+      : (((entryPrice - currentPrice) / entryPrice) * 100).toFixed(2);
+
+    const message = `${actionHeader}
+════════════════════
+🪙 <b>العملة / الزوج:</b> <code>${normalizedSymbol}</code>
+🧭 <b>نوع الصفقة:</b> ${statusBadge}
+🎯 <b>المحطة المنجزة:</b> ${targetHitName}
+📈 <b>الربح العائم المحقق:</b> +${profitPct}%
+════════════════════
+🎯 <b>سعر الدخول الأصلي:</b> ${formattedEntry}
+💵 <b>السعر الحالي (OKX):</b> ${formattedCurPrice}
+🔶 <b>سعر Binance الموازي:</b> ${parallelBinanceVal}
+════════════════════
+❌ <b>وقف الخسارة القديم (Old SL):</b> ${formattedOldSl}
+✅ <b>وقف الخسارة الجديد المحدث (New SL):</b> <b>${formattedNewSl}</b>
+
+💡 <i>${reason || (stage === 'BREAKEVEN' ? 'تم تأمين الصفقة بالكامل على نقطة الدخول (صفقة خالية من المخاطر بنسبة 100%)' : 'تم تفعيل حجز الأرباح الديناميكي عبر رفع وقف الخسارة لتأمين المكاسب المحققة')}</i>`;
+
+    const result = await sendTelegramMessage(message);
+    if (result.ok) {
+      return { success: true };
+    }
+    return { success: false, error: result.error };
+  } catch (err: any) {
+    return { success: false, error: err.message || 'Trailing stop telegram dispatch failed' };
+  }
+}
+
 export { sendTelegramMessage };
 
 export default async function telegramHandler(req: VercelRequest, res: VercelResponse) {
@@ -493,9 +576,24 @@ export default async function telegramHandler(req: VercelRequest, res: VercelRes
     }
   }
 
-  // Send Trade Signal Alert
+  // Send Trade Signal Alert or Trailing Stop Alert
+  if (action === 'send_trailing_stop') {
+    const payload = req.body || {};
+    const resPayload = await sendTelegramTrailingStopUpdate(payload);
+    if (resPayload.success) {
+      return res.status(200).json(resPayload);
+    } else {
+      return res.status(500).json(resPayload);
+    }
+  }
+
   if (action === 'send_signal' || req.method === 'POST') {
     const payload = req.body || {};
+    // If payload contains trailing stop stage, route to sendTelegramTrailingStopUpdate
+    if (payload.stage === 'BREAKEVEN' || payload.stage === 'TRAILING_LOCK') {
+      const resPayload = await sendTelegramTrailingStopUpdate(payload);
+      return res.status(resPayload.success ? 200 : 500).json(resPayload);
+    }
     const resPayload = await sendTelegramSignalDirect(payload);
     if (resPayload.success) {
       return res.status(200).json(resPayload);

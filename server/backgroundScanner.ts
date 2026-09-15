@@ -6,10 +6,31 @@
  */
 
 import { analyzeMarketData, POPULAR_SYMBOLS } from '../src/utils/technicalAnalysis';
-import { sendTelegramSignalDirect } from '../api/telegram';
+import { sendTelegramSignalDirect, sendTelegramTrailingStopUpdate } from '../api/telegram';
 import { recordSignalDirect } from '../api/turso';
 import { TradingMode } from '../src/types';
 import { setServerStrategySettings } from '../src/utils/settingsStore';
+import { fetchOkxTicker } from '../src/utils/okxApi';
+
+export interface TrackedActiveTrade {
+  symbol: string;
+  decision: 'BUY' | 'SELL';
+  entryPrice: number;
+  initialStopLoss: number;
+  currentStopLoss: number;
+  tp1: number;
+  tp2: number;
+  tp3: number;
+  tp4: number;
+  tp1Hit: boolean;
+  tp2Hit: boolean;
+  tp3Hit: boolean;
+  tp4Hit: boolean;
+  highestPrice: number;
+  lowestPrice: number;
+  stage: 'INITIAL' | 'BREAKEVEN' | 'TRAILING_LOCK_1' | 'TRAILING_LOCK_2' | 'CLOSED';
+  createdAt: number;
+}
 
 export interface ScannerDaemonStatus {
   isActive: boolean;
@@ -58,6 +79,7 @@ class BackgroundScannerDaemon {
     trade_setup?: any;
     telegramSent: boolean;
   }> = [];
+  private activeTrades: Map<string, TrackedActiveTrade> = new Map();
   private lastError: string | null = null;
 
   constructor() {
@@ -257,6 +279,32 @@ class BackgroundScannerDaemon {
                 if (this.lastSignals.length > 25) {
                   this.lastSignals.pop();
                 }
+
+                // 4. تسجيل الصفقة في مراقب التريلنج ستوب (Trailing Stop Monitor)
+                if (analysis.trade_setup && analysis.trade_setup.entry_price && analysis.trade_setup.stop_loss) {
+                  const ts = analysis.trade_setup;
+                  const curPrice = analysis.indicators.price;
+                  const tpVal = ts.take_profit || ts.take_profit_1;
+                  this.activeTrades.set(symbol, {
+                    symbol,
+                    decision: analysis.decision,
+                    entryPrice: ts.entry_price,
+                    initialStopLoss: ts.stop_loss,
+                    currentStopLoss: ts.stop_loss,
+                    tp1: ts.take_profit_1 || tpVal,
+                    tp2: ts.take_profit_2 || tpVal,
+                    tp3: ts.take_profit_3 || tpVal,
+                    tp4: ts.take_profit_4 || ts.take_profit || tpVal,
+                    tp1Hit: false,
+                    tp2Hit: false,
+                    tp3Hit: false,
+                    tp4Hit: false,
+                    highestPrice: curPrice,
+                    lowestPrice: curPrice,
+                    stage: 'INITIAL',
+                    createdAt: Date.now(),
+                  });
+                }
               }
             } catch (symErr: any) {
               // individual symbol error (e.g. temporary timeout) - don't crash whole cycle
@@ -269,6 +317,9 @@ class BackgroundScannerDaemon {
           await new Promise((r) => setTimeout(r, 350));
         }
       }
+
+      // فحص وتحديث الصفقات المفتوحة لعمل Stop Trailing ونقل الوقف للدخول أو حجز الأرباح
+      await this.processTrailingStopUpdates();
 
       this.totalScans++;
       this.lastScanTime = new Date().toISOString();
@@ -286,6 +337,144 @@ class BackgroundScannerDaemon {
     }
 
     return { scanned: symbolsToScan.length, signals: detectedSignals };
+  }
+
+  /**
+   * محرك مراقبة وتحديث الوقف المتحرك (Automated Trailing Stop & Breakeven Engine)
+   * يراقب حركة الأسعار اللحظية من OKX للصفقات النشطة، وعند وصول السعر إلى محطات الأهداف (TP1 / TP2 / TP3)،
+   * يقوم فورياً بتحديث الوقف وإرسال إشعار تليجرام فوري للمتداول لتأمين الصفقة وحجز الأرباح.
+   */
+  private async processTrailingStopUpdates(): Promise<void> {
+    if (this.activeTrades.size === 0) return;
+
+    const now = Date.now();
+    const maxAgeMs = 24 * 60 * 60 * 1000; // تنظيف الصفقات بعد 24 ساعة
+
+    for (const [symbol, trade] of Array.from(this.activeTrades.entries())) {
+      // إزالة الصفقات القديمة جداً
+      if (now - trade.createdAt > maxAgeMs || trade.stage === 'CLOSED') {
+        this.activeTrades.delete(symbol);
+        continue;
+      }
+
+      try {
+        const ticker = await fetchOkxTicker(symbol);
+        if (!ticker || ticker.lastPrice <= 0) continue;
+
+        const curPrice = ticker.lastPrice;
+        const isBuy = trade.decision === 'BUY';
+        const entry = trade.entryPrice;
+        const riskDist = Math.abs(entry - trade.initialStopLoss);
+
+        // تحديث أعلى/أدنى سعر تم الوصول إليه
+        if (curPrice > trade.highestPrice) trade.highestPrice = curPrice;
+        if (curPrice < trade.lowestPrice) trade.lowestPrice = curPrice;
+
+        // 1. فحص إذا ضرب السعر وقف الخسارة الحالي -> إغلاق المتابعة
+        if (isBuy && curPrice <= trade.currentStopLoss) {
+          trade.stage = 'CLOSED';
+          console.log(`[Trailing Stop] ${symbol} Hit Stop Loss ($${trade.currentStopLoss}). Closed tracking.`);
+          this.activeTrades.delete(symbol);
+          continue;
+        } else if (!isBuy && curPrice >= trade.currentStopLoss) {
+          trade.stage = 'CLOSED';
+          console.log(`[Trailing Stop] ${symbol} Hit Stop Loss ($${trade.currentStopLoss}). Closed tracking.`);
+          this.activeTrades.delete(symbol);
+          continue;
+        }
+
+        // 2. فحص إذا ضرب الهدف النهائي TP4 (2.0R) -> إغلاق المتابعة بنجاح
+        if (isBuy && curPrice >= trade.tp4) {
+          trade.stage = 'CLOSED';
+          console.log(`[Trailing Stop] ${symbol} Hit Final TP4 ($${trade.tp4}). Closed tracking with full profit!`);
+          this.activeTrades.delete(symbol);
+          continue;
+        } else if (!isBuy && curPrice <= trade.tp4) {
+          trade.stage = 'CLOSED';
+          console.log(`[Trailing Stop] ${symbol} Hit Final TP4 ($${trade.tp4}). Closed tracking with full profit!`);
+          this.activeTrades.delete(symbol);
+          continue;
+        }
+
+        // 3. المرحلة الأولى: نقل وقف الخسارة إلى الدخول (Breakeven - Risk Free)
+        // يُفعَّل عند تجاوز TP1 (+0.5R) أو تحقيق ربح كافٍ
+        const reachedTp1 = isBuy ? curPrice >= trade.tp1 : curPrice <= trade.tp1;
+        if (reachedTp1 && trade.stage === 'INITIAL') {
+          const oldSl = trade.currentStopLoss;
+          // نقل الوقف للدخول مع هامش وقائي ضئيل لتغطية رسوم المنصة (+0.05% في اتجاه الصفقة)
+          const newSl = isBuy ? entry * 1.0005 : entry * 0.9995;
+          trade.currentStopLoss = Number(newSl.toFixed(curPrice < 1 ? 6 : 4));
+          trade.stage = 'BREAKEVEN';
+          trade.tp1Hit = true;
+
+          console.log(`[Trailing Stop] 🛡️ ${symbol}: Moving SL to Breakeven $${trade.currentStopLoss}`);
+          await sendTelegramTrailingStopUpdate({
+            symbol,
+            decision: trade.decision,
+            currentPrice: curPrice,
+            entryPrice: entry,
+            oldStopLoss: oldSl,
+            newStopLoss: trade.currentStopLoss,
+            targetHitName: 'الهدف الأول TP1 (+0.5R)',
+            stage: 'BREAKEVEN',
+            reason: 'تم تحقيق الهدف الأول بنجاح، وتم نقل وقف الخسارة تلقائياً إلى نقطة الدخول لتأمين الصفقة بالكامل (Risk-Free Trade).',
+          });
+          continue;
+        }
+
+        // 4. المرحلة الثانية: قفل أرباح ورفع الوقف لمستوى الهدف الأول (Lock Profit at TP1)
+        // يُفعَّل عند تجاوز TP2 (+1.0R)
+        const reachedTp2 = isBuy ? curPrice >= trade.tp2 : curPrice <= trade.tp2;
+        if (reachedTp2 && (trade.stage === 'BREAKEVEN' || trade.stage === 'INITIAL')) {
+          const oldSl = trade.currentStopLoss;
+          const newSl = trade.tp1; // حجز ربح الهدف الأول كوقف جديد
+          trade.currentStopLoss = Number(newSl.toFixed(curPrice < 1 ? 6 : 4));
+          trade.stage = 'TRAILING_LOCK_1';
+          trade.tp2Hit = true;
+
+          console.log(`[Trailing Stop] 🚀 ${symbol}: Trailing SL locked at TP1 $${trade.currentStopLoss}`);
+          await sendTelegramTrailingStopUpdate({
+            symbol,
+            decision: trade.decision,
+            currentPrice: curPrice,
+            entryPrice: entry,
+            oldStopLoss: oldSl,
+            newStopLoss: trade.currentStopLoss,
+            targetHitName: 'الهدف الثاني TP2 (+1.0R)',
+            stage: 'TRAILING_LOCK',
+            reason: 'تم تحقيق الهدف الثاني بنجاح، وتم رفع وقف الخسارة إلى مستوى الهدف الأول (TP1) لضمان وحجز ربح إيجابي مضمون.',
+          });
+          continue;
+        }
+
+        // 5. المرحلة الثالثة: رفع الوقف لمستوى الهدف الثاني (Lock Profit at TP2)
+        // يُفعَّل عند تجاوز TP3 (+1.5R)
+        const reachedTp3 = isBuy ? curPrice >= trade.tp3 : curPrice <= trade.tp3;
+        if (reachedTp3 && (trade.stage === 'TRAILING_LOCK_1' || trade.stage === 'BREAKEVEN')) {
+          const oldSl = trade.currentStopLoss;
+          const newSl = trade.tp2; // حجز ربح الهدف الثاني كوقف جديد
+          trade.currentStopLoss = Number(newSl.toFixed(curPrice < 1 ? 6 : 4));
+          trade.stage = 'TRAILING_LOCK_2';
+          trade.tp3Hit = true;
+
+          console.log(`[Trailing Stop] 🚀 ${symbol}: Trailing SL locked at TP2 $${trade.currentStopLoss}`);
+          await sendTelegramTrailingStopUpdate({
+            symbol,
+            decision: trade.decision,
+            currentPrice: curPrice,
+            entryPrice: entry,
+            oldStopLoss: oldSl,
+            newStopLoss: trade.currentStopLoss,
+            targetHitName: 'الهدف الثالث TP3 (+1.5R)',
+            stage: 'TRAILING_LOCK',
+            reason: 'تم تحقيق الهدف الثالث بنجاح (+1.5R)، وتم رفع وقف الخسارة إلى مستوى الهدف الثاني (TP2) لتأمين الجزء الأكبر من الأرباح.',
+          });
+          continue;
+        }
+      } catch (tradeErr) {
+        // Silent recovery for individual trade checks
+      }
+    }
   }
 
   public getStatus(): ScannerDaemonStatus {
