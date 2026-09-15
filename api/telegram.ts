@@ -492,6 +492,10 @@ export async function sendTelegramTrailingStopUpdate(payload: TrailingStopUpdate
       ? (((currentPrice - entryPrice) / entryPrice) * 100).toFixed(2)
       : (((entryPrice - currentPrice) / entryPrice) * 100).toFixed(2);
 
+    const slActionArabic = isBuy
+      ? (stage === 'BREAKEVEN' ? 'نقل الوقف لسعر الدخول (تأمين)' : 'رفع الوقف لحجز الأرباح ⬆️')
+      : (stage === 'BREAKEVEN' ? 'نقل الوقف لسعر الدخول (تأمين)' : 'خفض الوقف لحجز الأرباح ⬇️');
+
     const message = `${actionHeader}
 ════════════════════
 🪙 <b>العملة / الزوج:</b> <code>${normalizedSymbol}</code>
@@ -499,14 +503,16 @@ export async function sendTelegramTrailingStopUpdate(payload: TrailingStopUpdate
 🎯 <b>المحطة المنجزة:</b> ${targetHitName}
 📈 <b>الربح العائم المحقق:</b> +${profitPct}%
 ════════════════════
-🎯 <b>سعر الدخول الأصلي:</b> ${formattedEntry}
+📍 <b>سعر الدخول:</b> ${formattedEntry}
 💵 <b>السعر الحالي (OKX):</b> ${formattedCurPrice}
 🔶 <b>سعر Binance الموازي:</b> ${parallelBinanceVal}
 ════════════════════
-❌ <b>وقف الخسارة القديم (Old SL):</b> ${formattedOldSl}
-✅ <b>وقف الخسارة الجديد المحدث (New SL):</b> <b>${formattedNewSl}</b>
+❌ <b>وقف الخسارة السابق (Old SL):</b> ${formattedOldSl}
+🚨 <b>وقف الخسارة الجديد للتعديل فوراً (New SL):</b>
+👉 <code>${newStopLoss}</code> 👈 <b>(${formattedNewSl})</b>
+⚙️ <b>الإجراء المطلوب:</b> ${slActionArabic}
 
-💡 <i>${reason || (stage === 'BREAKEVEN' ? 'تم تأمين الصفقة بالكامل على نقطة الدخول (صفقة خالية من المخاطر بنسبة 100%)' : 'تم تفعيل حجز الأرباح الديناميكي عبر رفع وقف الخسارة لتأمين المكاسب المحققة')}</i>`;
+💡 <i>${reason || (stage === 'BREAKEVEN' ? 'يرجى تعديل أمر Stop Loss في منصتك فوراً إلى السعر الموضح أعلاه لتأمين الصفقة بنسبة 100%.' : 'يرجى تعديل أمر Stop Loss في منصتك لحجز الأرباح المحققة.')}</i>`;
 
     const result = await sendTelegramMessage(message);
     if (result.ok) {
