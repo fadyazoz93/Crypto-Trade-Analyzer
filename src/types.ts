@@ -332,6 +332,8 @@ export interface TradeSetup {
   riskDistance?: number;
   breakEvenPrice?: number;
   trailingStopInitial?: number;
+  target50PercentPrice?: number; // مستوى 50% من مشوار الصفقة للهدف
+  trigger1_5AtrPrice?: number; // مستوى تفعيل تحريك الوقف عند وصول السعر إلى 1.5 ATR
   atrValue?: number;
   suggestedLotUnits?: number;
   suggestedPositionUsdt?: number;

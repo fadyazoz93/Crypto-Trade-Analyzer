@@ -2236,6 +2236,8 @@ export async function analyzeIntradayMarketData(symbol: string): Promise<Analysi
       riskDistance: Number(riskDist.toFixed(decimalPlaces)),
       breakEvenPrice: Number((targetDir === 'BUY' ? effectiveEntryPrice * 1.0005 : effectiveEntryPrice * 0.9995).toFixed(decimalPlaces)),
       trailingStopInitial: Number((targetDir === 'BUY' ? effectiveEntryPrice - atr_5m * 1.5 : effectiveEntryPrice + atr_5m * 1.5).toFixed(decimalPlaces)),
+      target50PercentPrice: Number((targetDir === 'BUY' ? effectiveEntryPrice + (tp4Calculated - effectiveEntryPrice) * 0.5 : effectiveEntryPrice - (effectiveEntryPrice - tp4Calculated) * 0.5).toFixed(decimalPlaces)),
+      trigger1_5AtrPrice: Number((targetDir === 'BUY' ? effectiveEntryPrice + (1.5 * atr_15m) : effectiveEntryPrice - (1.5 * atr_15m)).toFixed(decimalPlaces)),
       suggestedLotUnits: Number(lotUnits.toFixed(4)),
       suggestedPositionUsdt: Number(positionSizeUsdt.toFixed(2)),
       maxRiskUsdt: Number(maxRiskUsdt.toFixed(2)),

@@ -442,8 +442,8 @@ export interface TrailingStopUpdatePayload {
   entryPrice: number;
   oldStopLoss: number;
   newStopLoss: number;
-  targetHitName?: string; // e.g. "TP1 (+0.5R)" أو "TP2 (+1.0R)"
-  stage: 'BREAKEVEN' | 'TRAILING_LOCK';
+  targetHitName?: string; // e.g. "وصول السعر إلى 1.5 ATR" أو "TP1 (+0.5R)"
+  stage: 'BREAKEVEN' | 'TRAILING_LOCK' | 'TRAILING_50_LOCK';
   reason?: string;
   binancePrice?: number;
 }
@@ -484,7 +484,9 @@ export async function sendTelegramTrailingStopUpdate(payload: TrailingStopUpdate
 
     const actionHeader = stage === 'BREAKEVEN'
       ? `🛡️ <b>تحديث أمان: نقل وقف الخسارة لنقطة الدخول (Breakeven)</b>`
-      : `🚀 <b>تحديث أرباح: حجز الأرباح ورفع الوقف (Stop Trailing)</b>`;
+      : stage === 'TRAILING_50_LOCK'
+      ? `🎯 <b>تحديث ذكي: نقل الوقف لنصف مشوار الهدف (50% Trailing SL)</b>`
+      : `🚀 <b>تحديث أرباح: حجز الأرباح وتعديل الوقف (Stop Trailing)</b>`;
 
     const statusBadge = isBuy ? `🟢 شراء (LONG)` : `🔴 بيع (SHORT)`;
 
@@ -596,7 +598,7 @@ export default async function telegramHandler(req: VercelRequest, res: VercelRes
   if (action === 'send_signal' || req.method === 'POST') {
     const payload = req.body || {};
     // If payload contains trailing stop stage, route to sendTelegramTrailingStopUpdate
-    if (payload.stage === 'BREAKEVEN' || payload.stage === 'TRAILING_LOCK') {
+    if (payload.stage === 'BREAKEVEN' || payload.stage === 'TRAILING_LOCK' || payload.stage === 'TRAILING_50_LOCK') {
       const resPayload = await sendTelegramTrailingStopUpdate(payload);
       return res.status(resPayload.success ? 200 : 500).json(resPayload);
     }

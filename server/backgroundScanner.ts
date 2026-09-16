@@ -22,13 +22,19 @@ export interface TrackedActiveTrade {
   tp2: number;
   tp3: number;
   tp4: number;
+  targetPrice: number; // الهدف الأساسي للصفقة (Single TP / TP4)
+  target50Price: number; // نقطة منتصف الصفقة 50% من الهدف
+  atr: number; // قيمة الـ ATR (15m أو 5m) لحساب 1.5 ATR
+  trigger1_5AtrPrice: number; // مستوى السعر عند تحقيق 1.5 ATR في اتجاه الصفقة
   tp1Hit: boolean;
   tp2Hit: boolean;
   tp3Hit: boolean;
   tp4Hit: boolean;
+  halfway50Hit: boolean;
+  trigger1_5AtrHit: boolean;
   highestPrice: number;
   lowestPrice: number;
-  stage: 'INITIAL' | 'BREAKEVEN' | 'TRAILING_LOCK_1' | 'TRAILING_LOCK_2' | 'CLOSED';
+  stage: 'INITIAL' | 'BREAKEVEN' | 'TRAILING_LOCK_1' | 'TRAILING_LOCK_2' | 'TRAILING_50_LOCK' | 'CLOSED';
   createdAt: number;
 }
 
@@ -284,21 +290,44 @@ class BackgroundScannerDaemon {
                 if (analysis.trade_setup && analysis.trade_setup.entry_price && analysis.trade_setup.stop_loss) {
                   const ts = analysis.trade_setup;
                   const curPrice = analysis.indicators.price;
-                  const tpVal = ts.take_profit || ts.take_profit_1;
+                  const tpVal = ts.take_profit || ts.take_profit_4 || ts.take_profit_1;
+                  const isBuyTrade = analysis.decision === 'BUY';
+                  const entryP = ts.entry_price;
+
+                  // حساب نقطة الـ 50% من مشوار الصفقة نحو الهدف (Midpoint to Target)
+                  const target50 = isBuyTrade
+                    ? entryP + (tpVal - entryP) * 0.5
+                    : entryP - (entryP - tpVal) * 0.5;
+
+                  // حساب قيمة الـ ATR (15m أو 5m) لحساب 1.5 ATR بدقة
+                  const atrVal = ts.atr15m || ts.atrValue || Math.abs(entryP - ts.stop_loss) * 0.5;
+                  // نقطة انطلاق التنبيه والتحريك: عند وصول السعر إلى 1.5 ATR في اتجاه الصفقة
+                  const trigger1_5Atr = isBuyTrade
+                    ? entryP + (1.5 * atrVal)
+                    : entryP - (1.5 * atrVal);
+
+                  const decimalP = curPrice < 1 ? 6 : 4;
+
                   this.activeTrades.set(symbol, {
                     symbol,
                     decision: analysis.decision,
-                    entryPrice: ts.entry_price,
+                    entryPrice: entryP,
                     initialStopLoss: ts.stop_loss,
                     currentStopLoss: ts.stop_loss,
                     tp1: ts.take_profit_1 || tpVal,
                     tp2: ts.take_profit_2 || tpVal,
                     tp3: ts.take_profit_3 || tpVal,
                     tp4: ts.take_profit_4 || ts.take_profit || tpVal,
+                    targetPrice: tpVal,
+                    target50Price: Number(target50.toFixed(decimalP)),
+                    atr: atrVal,
+                    trigger1_5AtrPrice: Number(trigger1_5Atr.toFixed(decimalP)),
                     tp1Hit: false,
                     tp2Hit: false,
                     tp3Hit: false,
                     tp4Hit: false,
+                    halfway50Hit: false,
+                    trigger1_5AtrHit: false,
                     highestPrice: curPrice,
                     lowestPrice: curPrice,
                     stage: 'INITIAL',
@@ -396,8 +425,39 @@ class BackgroundScannerDaemon {
           continue;
         }
 
-        // 3. المرحلة الأولى: نقل وقف الخسارة إلى الدخول (Breakeven - Risk Free)
-        // يُفعَّل عند تجاوز TP1 (+0.5R) أو تحقيق ربح كافٍ
+        // 3. القاعدة الأساسية المطلوبة: نقل وقف الخسارة إلى 50% من مشوار الصفقة (Midpoint 50%) عند وصول السعر إلى 1.5 ATR
+        // يُفعَّل التنبيه وتحريك الوقف عندما يقطع السعر مسافة 1.5 ATR في اتجاه الصفقة
+        const reached1_5Atr = isBuy ? curPrice >= trade.trigger1_5AtrPrice : curPrice <= trade.trigger1_5AtrPrice;
+        if (reached1_5Atr && !trade.trigger1_5AtrHit) {
+          trade.trigger1_5AtrHit = true;
+          const oldSl = trade.currentStopLoss;
+          // نقطة الوقف المتحرك الجديدة = الوصول إلى 50% من الصفقة (Target 50% / Midpoint to Target)
+          const newSl = trade.target50Price;
+
+          // التأكد من أن الوقف الجديد يحجز ربحاً أفضل من الوقف السابق
+          const isBetterSl = isBuy ? newSl > oldSl : newSl < oldSl;
+          if (isBetterSl) {
+            trade.currentStopLoss = newSl;
+            trade.stage = 'TRAILING_50_LOCK';
+
+            console.log(`[Trailing Stop] 🎯 ${symbol}: 1.5 ATR reached! Moving SL to 50% of trade target ($${trade.currentStopLoss})`);
+            await sendTelegramTrailingStopUpdate({
+              symbol,
+              decision: trade.decision,
+              currentPrice: curPrice,
+              entryPrice: entry,
+              oldStopLoss: oldSl,
+              newStopLoss: trade.currentStopLoss,
+              targetHitName: 'وصول السعر إلى 1.5 ATR (قطع مسافة الزخم المطلوبة)',
+              stage: 'TRAILING_50_LOCK',
+              reason: `وصل السعر إلى مسافة 1.5 ATR (+${(trade.atr * 1.5).toFixed(curPrice < 1 ? 6 : 4)}$) في اتجاه الصفقة، وتم رفع وقف الخسارة تلقائياً ليغلق عند نقطة 50% من هدف الصفقة بالكامل ($${trade.currentStopLoss}).`,
+            });
+            continue;
+          }
+        }
+
+        // 4. المرحلة الأولى: نقل وقف الخسارة إلى الدخول (Breakeven - Risk Free)
+        // يُفعَّل عند تجاوز TP1 (+0.5R) أو تحقيق ربح كافٍ (في حال لم يبلغ 1.5 ATR بعد)
         const reachedTp1 = isBuy ? curPrice >= trade.tp1 : curPrice <= trade.tp1;
         if (reachedTp1 && trade.stage === 'INITIAL') {
           const oldSl = trade.currentStopLoss;
@@ -422,7 +482,7 @@ class BackgroundScannerDaemon {
           continue;
         }
 
-        // 4. المرحلة الثانية: قفل أرباح ورفع الوقف لمستوى الهدف الأول (Lock Profit at TP1)
+        // 5. المرحلة الثانية: قفل أرباح ورفع الوقف لمستوى الهدف الأول (Lock Profit at TP1)
         // يُفعَّل عند تجاوز TP2 (+1.0R)
         const reachedTp2 = isBuy ? curPrice >= trade.tp2 : curPrice <= trade.tp2;
         if (reachedTp2 && (trade.stage === 'BREAKEVEN' || trade.stage === 'INITIAL')) {
@@ -447,7 +507,7 @@ class BackgroundScannerDaemon {
           continue;
         }
 
-        // 5. المرحلة الثالثة: رفع الوقف لمستوى الهدف الثاني (Lock Profit at TP2)
+        // 6. المرحلة الثالثة: رفع الوقف لمستوى الهدف الثاني (Lock Profit at TP2)
         // يُفعَّل عند تجاوز TP3 (+1.5R)
         const reachedTp3 = isBuy ? curPrice >= trade.tp3 : curPrice <= trade.tp3;
         if (reachedTp3 && (trade.stage === 'TRAILING_LOCK_1' || trade.stage === 'BREAKEVEN')) {
