@@ -133,6 +133,17 @@ function removeFromDiskCache(key: string) {
 const serverSentSignalsCache = new Map<string, number>();
 const inFlightSignalLocks = new Set<string>();
 
+// سجل منع تكرار رسائل تحريك الوقف (Stop Trailing) لنفس العملة
+interface TrailingRecord {
+  stage: string;
+  newStopLoss: number;
+  sentAt: number;
+}
+const inFlightTrailingLocks = new Set<string>();
+const recentTrailingHistory = new Map<string, TrailingRecord>();
+// مهلة فاصلة لا تقل عن 3 دقائق بين أي إشعارين لتحريك الوقف لنفس العملة لمنع الرسائل المتزامنة
+const TRAILING_DEDUP_COOLDOWN_MS = 3 * 60 * 1000;
+
 export function normalizeSymbolKey(sym: string): string {
   return String(sym || '')
     .trim()
@@ -452,21 +463,56 @@ export interface TrailingStopUpdatePayload {
  * إرسال إشعار تليجرام عند تعديل وقف الخسارة (Stop Trailing / Move SL to Entry or Profit)
  */
 export async function sendTelegramTrailingStopUpdate(payload: TrailingStopUpdatePayload): Promise<{ success: boolean; error?: string }> {
-  try {
-    const {
-      symbol,
-      decision,
-      currentPrice,
-      entryPrice,
-      oldStopLoss,
-      newStopLoss,
-      targetHitName = 'تحقيق هدف جزئي',
-      stage,
-      reason,
-      binancePrice,
-    } = payload;
+  const {
+    symbol,
+    decision,
+    currentPrice,
+    entryPrice,
+    oldStopLoss,
+    newStopLoss,
+    targetHitName = 'تحقيق هدف جزئي',
+    stage,
+    reason,
+    binancePrice,
+  } = payload;
 
-    const normalizedSymbol = normalizeSymbolKey(symbol);
+  const normalizedSymbol = normalizeSymbolKey(symbol);
+  const lockKey = `${normalizedSymbol}_TRAILING`;
+
+  // 1. منع التكرار اللحظي المتزامن (In-Flight Race Condition Lock)
+  if (inFlightTrailingLocks.has(lockKey)) {
+    console.log(`[Trailing Dedup] Trailing update for ${normalizedSymbol} is currently in-flight. Skipping parallel duplicate.`);
+    return { success: true };
+  }
+
+  const now = Date.now();
+  const lastRecord = recentTrailingHistory.get(normalizedSymbol);
+  if (lastRecord) {
+    // 2. منع تكرار نفس المرحلة أو نفس وقف الخسارة تماماً لنفس العملة
+    const isSameStage = lastRecord.stage === stage;
+    const isSameSl = Math.abs(lastRecord.newStopLoss - newStopLoss) < 1e-6;
+    if (isSameStage || isSameSl) {
+      console.log(`[Trailing Dedup] Duplicate trailing update for ${normalizedSymbol} (${stage} / SL ${newStopLoss}) already sent. Skipping.`);
+      return { success: true };
+    }
+
+    // 3. منع إرسال Breakeven إذا كانت الصفقة قد أرسلت بالفعل مرحلة أعلى (مثل 50% Trailing SL)
+    if (stage === 'BREAKEVEN' && (lastRecord.stage === 'TRAILING_50_LOCK' || lastRecord.stage === 'TRAILING_LOCK')) {
+      console.log(`[Trailing Dedup] Breakeven update for ${normalizedSymbol} blocked because higher lock (${lastRecord.stage}) was already sent.`);
+      return { success: true };
+    }
+
+    // 4. منع إرسال رسائل متعددة لنفس العملة في نفس الوقت (نافذة تبريد 3 دقائق على الأقل)
+    if (now - lastRecord.sentAt < TRAILING_DEDUP_COOLDOWN_MS) {
+      const elapsedSec = Math.round((now - lastRecord.sentAt) / 1000);
+      console.log(`[Trailing Dedup] Throttling trailing update for ${normalizedSymbol}: dispatched ${elapsedSec}s ago. Skipping simultaneous duplicate.`);
+      return { success: true };
+    }
+  }
+
+  inFlightTrailingLocks.add(lockKey);
+
+  try {
     const isBuy = decision === 'BUY';
 
     let parallelBinancePrice = binancePrice;
@@ -490,20 +536,29 @@ export async function sendTelegramTrailingStopUpdate(payload: TrailingStopUpdate
 
     const statusBadge = isBuy ? `🟢 شراء (LONG)` : `🔴 بيع (SHORT)`;
 
-    const profitPct = isBuy
-      ? (((currentPrice - entryPrice) / entryPrice) * 100).toFixed(2)
-      : (((entryPrice - currentPrice) / entryPrice) * 100).toFixed(2);
-
     const slActionArabic = isBuy
       ? (stage === 'BREAKEVEN' ? 'نقل الوقف لسعر الدخول (تأمين)' : 'رفع الوقف لحجز الأرباح ⬆️')
       : (stage === 'BREAKEVEN' ? 'نقل الوقف لسعر الدخول (تأمين)' : 'خفض الوقف لحجز الأرباح ⬇️');
 
-    const message = `${actionHeader}
+    let message = '';
+    if (stage === 'BREAKEVEN') {
+      message = `${actionHeader}
 ════════════════════
 🪙 <b>العملة / الزوج:</b> <code>${normalizedSymbol}</code>
 🧭 <b>نوع الصفقة:</b> ${statusBadge}
-🎯 <b>المحطة المنجزة:</b> ${targetHitName}
-📈 <b>الربح العائم المحقق:</b> +${profitPct}%
+════════════════════
+📍 <b>سعر الدخول:</b> ${formattedEntry}
+💵 <b>السعر الحالي (OKX):</b> ${formattedCurPrice}
+🔶 <b>سعر Binance الموازي:</b> ${parallelBinanceVal}
+════════════════════
+❌ <b>وقف الخسارة السابق (Old SL):</b> ${formattedOldSl}
+🚨 <b>وقف الخسارة الجديد للتعديل فوراً (New SL):</b> ${formattedNewSl}
+⚙️ <b>الإجراء المطلوب:</b> ${slActionArabic}`;
+    } else {
+      message = `${actionHeader}
+════════════════════
+🪙 <b>العملة / الزوج:</b> <code>${normalizedSymbol}</code>
+🧭 <b>نوع الصفقة:</b> ${statusBadge}
 ════════════════════
 📍 <b>سعر الدخول:</b> ${formattedEntry}
 💵 <b>السعر الحالي (OKX):</b> ${formattedCurPrice}
@@ -511,18 +566,24 @@ export async function sendTelegramTrailingStopUpdate(payload: TrailingStopUpdate
 ════════════════════
 ❌ <b>وقف الخسارة السابق (Old SL):</b> ${formattedOldSl}
 🚨 <b>وقف الخسارة الجديد للتعديل فوراً (New SL):</b>
-👉 <code>${newStopLoss}</code> 👈 <b>(${formattedNewSl})</b>
-⚙️ <b>الإجراء المطلوب:</b> ${slActionArabic}
-
-💡 <i>${reason || (stage === 'BREAKEVEN' ? 'يرجى تعديل أمر Stop Loss في منصتك فوراً إلى السعر الموضح أعلاه لتأمين الصفقة بنسبة 100%.' : 'يرجى تعديل أمر Stop Loss في منصتك لحجز الأرباح المحققة.')}</i>`;
+${formattedNewSl}
+⚙️ <b>الإجراء المطلوب:</b> ${slActionArabic}`;
+    }
 
     const result = await sendTelegramMessage(message);
     if (result.ok) {
+      recentTrailingHistory.set(normalizedSymbol, {
+        stage,
+        newStopLoss,
+        sentAt: Date.now(),
+      });
       return { success: true };
     }
     return { success: false, error: result.error };
   } catch (err: any) {
     return { success: false, error: err.message || 'Trailing stop telegram dispatch failed' };
+  } finally {
+    inFlightTrailingLocks.delete(lockKey);
   }
 }
 
