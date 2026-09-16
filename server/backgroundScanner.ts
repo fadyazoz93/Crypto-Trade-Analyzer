@@ -434,24 +434,30 @@ class BackgroundScannerDaemon {
           continue;
         }
 
-        // 3. القاعدة الأساسية المطلوبة: نقل وقف الخسارة إلى 50% من مشوار الصفقة (Midpoint 50%) عند وصول السعر إلى 1.5 ATR
-        // يُفعَّل التنبيه وتحريك الوقف عندما يقطع السعر مسافة 1.5 ATR في اتجاه الصفقة
+        // 3. المرحلة الأولى: نقل وقف الخسارة إلى الدخول (Breakeven - Risk Free)
+        // يُفعَّل التنبيه وتحريك الوقف عند وصول السعر إلى 1.5 ATR (أو تحقيق TP1) لتأمين الصفقة بالكامل
         const reached1_5Atr = isBuy ? curPrice >= trade.trigger1_5AtrPrice : curPrice <= trade.trigger1_5AtrPrice;
-        if (reached1_5Atr && !trade.trigger1_5AtrHit) {
-          trade.trigger1_5AtrHit = true;
-          trade.tp1Hit = true; // وضع علامة على TP1 لتفادي إرسال إشعار الدخول Breakeven في نفس الوقت!
-          const oldSl = trade.currentStopLoss;
-          // نقطة الوقف المتحرك الجديدة = الوصول إلى 50% من الصفقة (Target 50% / Midpoint to Target)
-          const newSl = trade.target50Price;
+        const reachedTp1 = isBuy ? curPrice >= trade.tp1 : curPrice <= trade.tp1;
 
-          // التأكد من أن الوقف الجديد يحجز ربحاً أفضل من الوقف السابق
+        if ((reached1_5Atr || reachedTp1) && trade.stage === 'INITIAL' && !trade.trigger1_5AtrHit && !trade.tp1Hit) {
+          trade.trigger1_5AtrHit = true;
+          trade.tp1Hit = true;
+          const oldSl = trade.currentStopLoss;
+          // نقل الوقف للدخول مع هامش وقائي ضئيل لتغطية رسوم المنصة (+0.05% في اتجاه الصفقة)
+          // هذا يضمن أن الوقف الجديد يقع دائماً خلف السعر الحالي بمسافة 1.5 ATR كاملة
+          const breakevenSl = isBuy ? entry * 1.0005 : entry * 0.9995;
+          const newSl = Number(breakevenSl.toFixed(curPrice < 1 ? 6 : 4));
+
+          // التأكد من أن الوقف يقع على الجانب الصحيح من السعر الحالي
+          const isValidSl = isBuy ? newSl < curPrice : newSl > curPrice;
           const isBetterSl = isBuy ? newSl > oldSl : newSl < oldSl;
-          if (isBetterSl) {
+
+          if (isValidSl && isBetterSl) {
             trade.currentStopLoss = newSl;
-            trade.stage = 'TRAILING_50_LOCK';
+            trade.stage = 'BREAKEVEN';
             trade.lastTrailingNotifyAt = now;
 
-            console.log(`[Trailing Stop] 🎯 ${symbol}: 1.5 ATR reached! Moving SL to 50% of trade target ($${trade.currentStopLoss})`);
+            console.log(`[Trailing Stop] 🛡️ ${symbol}: 1.5 ATR / TP1 reached! Moving SL to Breakeven $${trade.currentStopLoss}`);
             await sendTelegramTrailingStopUpdate({
               symbol,
               decision: trade.decision,
@@ -459,49 +465,67 @@ class BackgroundScannerDaemon {
               entryPrice: entry,
               oldStopLoss: oldSl,
               newStopLoss: trade.currentStopLoss,
-              targetHitName: 'وصول السعر إلى 1.5 ATR (قطع مسافة الزخم المطلوبة)',
-              stage: 'TRAILING_50_LOCK',
-              reason: `وصل السعر إلى مسافة 1.5 ATR (+${(trade.atr * 1.5).toFixed(curPrice < 1 ? 6 : 4)}$) في اتجاه الصفقة، وتم رفع وقف الخسارة تلقائياً ليغلق عند نقطة 50% من هدف الصفقة بالكامل ($${trade.currentStopLoss}).`,
+              targetHitName: reached1_5Atr ? 'وصول السعر إلى 1.5 ATR (قطع مسافة الزخم المطلوبة)' : 'الهدف الأول TP1 (+0.5R)',
+              stage: 'BREAKEVEN',
+              reason: 'تحرك السعر مسافة 1.5 ATR في اتجاه الصفقة بنجاح، وتم نقل وقف الخسارة تلقائياً إلى نقطة الدخول لتأمين الصفقة بالكامل (Risk-Free Trade).',
             });
             continue;
           }
         }
 
-        // 4. المرحلة الأولى: نقل وقف الخسارة إلى الدخول (Breakeven - Risk Free)
-        // يُفعَّل عند تجاوز TP1 (+0.5R) أو تحقيق ربح كافٍ (بشرط عدم بلوغ 1.5 ATR لتفادي التكرار المتزامن)
-        const reachedTp1 = isBuy ? curPrice >= trade.tp1 : curPrice <= trade.tp1;
-        if (reachedTp1 && trade.stage === 'INITIAL' && !trade.tp1Hit && !trade.trigger1_5AtrHit && !reached1_5Atr) {
+        // 4. المرحلة الثانية: نقل الوقف لنصف مشوار الهدف (50% Trailing SL)
+        // يُفعَّل عندما يصل السعر فعلياً إلى 50% من مشوار الصفقة نحو الهدف النهائي (Target 50% Midpoint)
+        const reachedTarget50 = isBuy ? curPrice >= trade.target50Price : curPrice <= trade.target50Price;
+        if (reachedTarget50 && !trade.halfway50Hit && (trade.stage === 'BREAKEVEN' || trade.stage === 'INITIAL')) {
+          trade.halfway50Hit = true;
           const oldSl = trade.currentStopLoss;
-          // نقل الوقف للدخول مع هامش وقائي ضئيل لتغطية رسوم المنصة (+0.05% في اتجاه الصفقة)
-          const newSl = isBuy ? entry * 1.0005 : entry * 0.9995;
-          trade.currentStopLoss = Number(newSl.toFixed(curPrice < 1 ? 6 : 4));
-          trade.stage = 'BREAKEVEN';
-          trade.tp1Hit = true;
-          trade.lastTrailingNotifyAt = now;
 
-          console.log(`[Trailing Stop] 🛡️ ${symbol}: Moving SL to Breakeven $${trade.currentStopLoss}`);
-          await sendTelegramTrailingStopUpdate({
-            symbol,
-            decision: trade.decision,
-            currentPrice: curPrice,
-            entryPrice: entry,
-            oldStopLoss: oldSl,
-            newStopLoss: trade.currentStopLoss,
-            targetHitName: 'الهدف الأول TP1 (+0.5R)',
-            stage: 'BREAKEVEN',
-            reason: 'تم تحقيق الهدف الأول بنجاح، وتم نقل وقف الخسارة تلقائياً إلى نقطة الدخول لتأمين الصفقة بالكامل (Risk-Free Trade).',
-          });
-          continue;
+          // عند وصول السعر لنصف المشوار، يتم حجز نصف الأرباح المقطوعة خلف السعر (بين الدخول والسعر الحالي)
+          // أو بمسافة 1.5 ATR خلف السعر الحالي، مع ضمان أنه أسفل السعر الحالي في الشراء وأعلى منه في البيع
+          const rawCalculatedSl = isBuy
+            ? Math.max(entry + (curPrice - entry) * 0.5, trade.tp1, curPrice - (1.5 * trade.atr))
+            : Math.min(entry - (entry - curPrice) * 0.5, trade.tp1, curPrice + (1.5 * trade.atr));
+
+          // قيد أمان صارم: الوقف الجديد يجب أن يبتعد عن السعر الحالي بهامش أمان كافٍ
+          const safeSl = isBuy
+            ? Math.min(rawCalculatedSl, curPrice - (trade.atr * 0.5))
+            : Math.max(rawCalculatedSl, curPrice + (trade.atr * 0.5));
+
+          const newSl = Number(safeSl.toFixed(curPrice < 1 ? 6 : 4));
+
+          const isValidSl = isBuy ? newSl < curPrice : newSl > curPrice;
+          const isBetterSl = isBuy ? newSl > oldSl : newSl < oldSl;
+
+          if (isValidSl && isBetterSl) {
+            trade.currentStopLoss = newSl;
+            trade.stage = 'TRAILING_50_LOCK';
+            trade.lastTrailingNotifyAt = now;
+
+            console.log(`[Trailing Stop] 🎯 ${symbol}: 50% Target Midpoint reached! Trailing SL moved to $${trade.currentStopLoss}`);
+            await sendTelegramTrailingStopUpdate({
+              symbol,
+              decision: trade.decision,
+              currentPrice: curPrice,
+              entryPrice: entry,
+              oldStopLoss: oldSl,
+              newStopLoss: trade.currentStopLoss,
+              targetHitName: 'الوصول إلى 50% من مشوار الهدف (نصف مسافة الصفقة)',
+              stage: 'TRAILING_50_LOCK',
+              reason: 'وصل السعر بنجاح إلى 50% من مشوار الصفقة نحو الهدف النهائي، وتم رفع وقف الخسارة لحجز نصف الأرباح وضمان خروج رابح.',
+            });
+            continue;
+          }
         }
 
-        // 5. المرحلة الثانية: قفل أرباح ورفع الوقف لمستوى الهدف الأول (Lock Profit at TP1)
+        // 5. المرحلة الثالثة: قفل أرباح ورفع الوقف لمستوى الهدف الأول (Lock Profit at TP1)
         // يُفعَّل عند تجاوز TP2 (+1.0R)
         const reachedTp2 = isBuy ? curPrice >= trade.tp2 : curPrice <= trade.tp2;
-        if (reachedTp2 && (trade.stage === 'BREAKEVEN' || trade.stage === 'INITIAL') && !trade.tp2Hit) {
+        if (reachedTp2 && (trade.stage === 'BREAKEVEN' || trade.stage === 'TRAILING_50_LOCK' || trade.stage === 'INITIAL') && !trade.tp2Hit) {
           const oldSl = trade.currentStopLoss;
           const newSl = trade.tp1; // حجز ربح الهدف الأول كوقف جديد
+          const isValidSl = isBuy ? newSl < curPrice : newSl > curPrice;
           const isBetterSl = isBuy ? newSl > oldSl : newSl < oldSl;
-          if (isBetterSl) {
+          if (isValidSl && isBetterSl) {
             trade.currentStopLoss = Number(newSl.toFixed(curPrice < 1 ? 6 : 4));
             trade.stage = 'TRAILING_LOCK_1';
             trade.tp2Hit = true;
@@ -523,14 +547,15 @@ class BackgroundScannerDaemon {
           }
         }
 
-        // 6. المرحلة الثالثة: رفع الوقف لمستوى الهدف الثاني (Lock Profit at TP2)
+        // 6. المرحلة الرابعة: رفع الوقف لمستوى الهدف الثاني (Lock Profit at TP2)
         // يُفعَّل عند تجاوز TP3 (+1.5R)
         const reachedTp3 = isBuy ? curPrice >= trade.tp3 : curPrice <= trade.tp3;
-        if (reachedTp3 && (trade.stage === 'TRAILING_LOCK_1' || trade.stage === 'BREAKEVEN') && !trade.tp3Hit) {
+        if (reachedTp3 && (trade.stage === 'TRAILING_LOCK_1' || trade.stage === 'TRAILING_50_LOCK' || trade.stage === 'BREAKEVEN') && !trade.tp3Hit) {
           const oldSl = trade.currentStopLoss;
           const newSl = trade.tp2; // حجز ربح الهدف الثاني كوقف جديد
+          const isValidSl = isBuy ? newSl < curPrice : newSl > curPrice;
           const isBetterSl = isBuy ? newSl > oldSl : newSl < oldSl;
-          if (isBetterSl) {
+          if (isValidSl && isBetterSl) {
             trade.currentStopLoss = Number(newSl.toFixed(curPrice < 1 ? 6 : 4));
             trade.stage = 'TRAILING_LOCK_2';
             trade.tp3Hit = true;

@@ -514,6 +514,19 @@ export async function sendTelegramTrailingStopUpdate(payload: TrailingStopUpdate
 
   try {
     const isBuy = decision === 'BUY';
+    let actualNewStopLoss = newStopLoss;
+
+    // ضمان التوافق التام والقطعي مع حركة السعر والشارت:
+    // في صفقات الشراء (LONG): يستحيل أن يكون الوقف أعلى من أو مساوياً للسعر الحالي
+    if (isBuy && actualNewStopLoss >= currentPrice) {
+      console.warn(`[Trailing Safety] Invariant violation: New SL ${actualNewStopLoss} >= currentPrice ${currentPrice} in BUY. Correcting below price.`);
+      actualNewStopLoss = Number(Math.min(entryPrice, currentPrice * 0.997).toFixed(currentPrice < 1 ? 6 : 4));
+    }
+    // في صفقات البيع (SHORT): يستحيل أن يكون الوقف أقل من أو مساوياً للسعر الحالي
+    if (!isBuy && actualNewStopLoss <= currentPrice) {
+      console.warn(`[Trailing Safety] Invariant violation: New SL ${actualNewStopLoss} <= currentPrice ${currentPrice} in SELL. Correcting above price.`);
+      actualNewStopLoss = Number(Math.max(entryPrice, currentPrice * 1.003).toFixed(currentPrice < 1 ? 6 : 4));
+    }
 
     let parallelBinancePrice = binancePrice;
     if (parallelBinancePrice === undefined || parallelBinancePrice === null) {
@@ -523,7 +536,7 @@ export async function sendTelegramTrailingStopUpdate(payload: TrailingStopUpdate
     const formattedCurPrice = formatNumberVal(currentPrice);
     const formattedEntry = formatNumberVal(entryPrice);
     const formattedOldSl = formatNumberVal(oldStopLoss);
-    const formattedNewSl = formatNumberVal(newStopLoss);
+    const formattedNewSl = formatNumberVal(actualNewStopLoss);
     const parallelBinanceVal = (parallelBinancePrice && parallelBinancePrice > 0)
       ? formatNumberVal(parallelBinancePrice)
       : formattedCurPrice;
@@ -574,7 +587,7 @@ ${formattedNewSl}
     if (result.ok) {
       recentTrailingHistory.set(normalizedSymbol, {
         stage,
-        newStopLoss,
+        newStopLoss: actualNewStopLoss,
         sentAt: Date.now(),
       });
       return { success: true };
