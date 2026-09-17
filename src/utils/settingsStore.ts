@@ -118,6 +118,13 @@ export interface StrategySettings {
 
   // 12. Trade Signal Notification Cooldown (Anti-Spam Filter)
   signalCooldownMinutes: number; // default: 30 minutes cooldown between duplicate alerts for same symbol
+
+  // 13. Advanced Precision Guards (Anti-FOMO, Altcoin Buffer, Rejection Wick, Session Liquidity)
+  enableAntiFomoGuard: boolean; // default: true (prevents chasing extended pumps/dumps)
+  antiFomoMaxExtensionPercent: number; // default: 1.2% for BTC, 1.8% for Altcoins
+  enableAltcoinSessionGuard: boolean; // default: true (blocks altcoins in 22:00-06:00 UTC low-liquidity hours)
+  enableAdverseWickGuard: boolean; // default: true (blocks buying under shooting stars or selling over hammers)
+  enableAdaptiveAltcoinBuffer: boolean; // default: true (expands SL on volatile altcoins with auto position downscaling)
 }
 
 const SETTINGS_KEY = 'crypto_analyzer_strategy_settings_v41';
@@ -238,12 +245,23 @@ export const DEFAULT_SETTINGS: StrategySettings = {
 
   // 13. Trade Signal Notification Cooldown (Anti-Spam Filter)
   signalCooldownMinutes: 30, // default: 30 minutes
+
+  // 14. Advanced Precision Guards
+  enableAntiFomoGuard: true,
+  antiFomoMaxExtensionPercent: 1.2,
+  enableAltcoinSessionGuard: true,
+  enableAdverseWickGuard: true,
+  enableAdaptiveAltcoinBuffer: true,
 };
 
 let serverSettings: StrategySettings = {
   ...DEFAULT_SETTINGS,
   flexibleMode: true,
   sopScoreNeeded: 4,
+  enableAntiFomoGuard: true,
+  enableAltcoinSessionGuard: true,
+  enableAdverseWickGuard: true,
+  enableAdaptiveAltcoinBuffer: true,
 };
 
 export function setServerStrategySettings(updates: Partial<StrategySettings>): void {
@@ -282,6 +300,11 @@ export function getStrategySettings(): StrategySettings {
       tp3Ratio: 1.5,
       tp4Ratio: 2.0,
       signalCooldownMinutes: parsed.signalCooldownMinutes !== undefined && Number(parsed.signalCooldownMinutes) > 0 ? Number(parsed.signalCooldownMinutes) : 45,
+      enableAntiFomoGuard: parsed.enableAntiFomoGuard !== undefined ? Boolean(parsed.enableAntiFomoGuard) : true,
+      antiFomoMaxExtensionPercent: parsed.antiFomoMaxExtensionPercent !== undefined && Number(parsed.antiFomoMaxExtensionPercent) > 0 ? Number(parsed.antiFomoMaxExtensionPercent) : 1.2,
+      enableAltcoinSessionGuard: parsed.enableAltcoinSessionGuard !== undefined ? Boolean(parsed.enableAltcoinSessionGuard) : true,
+      enableAdverseWickGuard: parsed.enableAdverseWickGuard !== undefined ? Boolean(parsed.enableAdverseWickGuard) : true,
+      enableAdaptiveAltcoinBuffer: parsed.enableAdaptiveAltcoinBuffer !== undefined ? Boolean(parsed.enableAdaptiveAltcoinBuffer) : true,
     };
     return settings;
   } catch (err) {

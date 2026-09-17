@@ -675,6 +675,82 @@ export const StrategySettingsModal: React.FC<StrategySettingsModalProps> = ({ is
                 إدراج سعر بينانس اللحظي جنباً إلى جنب مع سعر OKX في رسائل تليجرام، مع توضيح نوع الأمر (معلق Limit أم فوري Market) لمنع أي التباس مع الشارت.
               </p>
             </div>
+
+            {/* 10. Anti-FOMO Guard */}
+            <div className="p-3 bg-slate-900 rounded-xl border border-slate-800 space-y-2">
+              <label className="flex items-center justify-between cursor-pointer">
+                <span className="font-bold text-rose-300">🛑 فلتر منع مطاردة القمم والقيعان (Anti-FOMO)</span>
+                <input
+                  type="checkbox"
+                  checked={settings.enableAntiFomoGuard ?? true}
+                  onChange={(e) => setSettings({ ...settings, enableAntiFomoGuard: e.target.checked })}
+                  className="rounded border-slate-700 text-rose-500 focus:ring-rose-500 w-4 h-4 cursor-pointer"
+                />
+              </label>
+              <div className="flex items-center gap-2">
+                <span className="text-slate-400 text-[11px]">أقصى تباعد عن 20 EMA (%):</span>
+                <input
+                  type="number"
+                  step="0.1"
+                  min="0.5"
+                  max="3.0"
+                  value={settings.antiFomoMaxExtensionPercent ?? 1.2}
+                  onChange={(e) => setSettings({ ...settings, antiFomoMaxExtensionPercent: Number(e.target.value) })}
+                  className="w-16 bg-slate-950 border border-slate-700 p-1 rounded text-rose-300 font-mono text-center font-bold"
+                />
+              </div>
+              <p className="text-[10px] text-slate-400 leading-relaxed">
+                حظر الشراء إذا كان السعر أعلى من متوسط 20 EMA بأكثر من {settings.antiFomoMaxExtensionPercent || 1.2}%، وحظر البيع عند القيعان الممتدة، لتفادي مصائد السيولة والانعكاسات المفاجئة.
+              </p>
+            </div>
+
+            {/* 11. Altcoin Session Liquidity Guard */}
+            <div className="p-3 bg-slate-900 rounded-xl border border-slate-800 space-y-2">
+              <label className="flex items-center justify-between cursor-pointer">
+                <span className="font-bold text-indigo-300">🌙 فلتر ركود سيولة العملات البديلة (Session Guard)</span>
+                <input
+                  type="checkbox"
+                  checked={settings.enableAltcoinSessionGuard ?? true}
+                  onChange={(e) => setSettings({ ...settings, enableAltcoinSessionGuard: e.target.checked })}
+                  className="rounded border-slate-700 text-indigo-500 focus:ring-indigo-500 w-4 h-4 cursor-pointer"
+                />
+              </label>
+              <p className="text-[10px] text-slate-400 leading-relaxed">
+                حظر صفقات العملات البديلة خلال ساعات الركود والتصفيات (22:00 - 06:00 UTC) وقصر التداول على البيتكوين فقط لتفادي الكسر الكاذب والانزلاق السعري.
+              </p>
+            </div>
+
+            {/* 12. Adverse Rejection Wick Guard */}
+            <div className="p-3 bg-slate-900 rounded-xl border border-slate-800 space-y-2">
+              <label className="flex items-center justify-between cursor-pointer">
+                <span className="font-bold text-amber-300">🕯️ فلتر الشموع الرافضة (Adverse Wick Guard)</span>
+                <input
+                  type="checkbox"
+                  checked={settings.enableAdverseWickGuard ?? true}
+                  onChange={(e) => setSettings({ ...settings, enableAdverseWickGuard: e.target.checked })}
+                  className="rounded border-slate-700 text-amber-500 focus:ring-amber-500 w-4 h-4 cursor-pointer"
+                />
+              </label>
+              <p className="text-[10px] text-slate-400 leading-relaxed">
+                فحص شمعة 15M المكتملة وحظر الشراء إذا أغلقت بنموذج شهاب بيعي (ذيل علوي ≥ 50%) وحظر البيع إذا أغلقت بنموذج مطرقة شرائية (ذيل سفلي ≥ 50%).
+              </p>
+            </div>
+
+            {/* 13. Adaptive Altcoin Stop Loss Buffer */}
+            <div className="p-3 bg-slate-900 rounded-xl border border-slate-800 space-y-2">
+              <label className="flex items-center justify-between cursor-pointer">
+                <span className="font-bold text-emerald-300">🛡️ الوقف التكيفي للعملات البديلة (Adaptive SL)</span>
+                <input
+                  type="checkbox"
+                  checked={settings.enableAdaptiveAltcoinBuffer ?? true}
+                  onChange={(e) => setSettings({ ...settings, enableAdaptiveAltcoinBuffer: e.target.checked })}
+                  className="rounded border-slate-700 text-emerald-500 focus:ring-emerald-500 w-4 h-4 cursor-pointer"
+                />
+              </label>
+              <p className="text-[10px] text-slate-400 leading-relaxed">
+                توسيع وقف الخسارة للعملات البديلة إلى 2.4x ATR مع هامش 1.2% لحمايتها من ذيول ضرب الوقف السريعة، مع تصغير حجم العقد آلياً لتثبيت المخاطرة عند 1% بالضبط.
+              </p>
+            </div>
           </div>
         </div>
 

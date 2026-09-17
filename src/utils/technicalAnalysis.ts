@@ -108,7 +108,7 @@ export async function checkSpreadGuard(symbol: string): Promise<SpreadGuardStatu
  * سوق العملات الرقمية يعمل 24/7 على مدار الساعة طوال أيام الأسبوع في جميع الجلسات (آسيا، لندن، نيويورك).
  * الجلسات تُعرض كمعلومات إحصائية فقط بدون حظر الصفقات لضمان اقتناص كافة الفرص المؤسسية.
  */
-export function checkTradingTimeGuard(now = new Date()): TimeGuardStatus {
+export function checkTradingTimeGuard(symbol?: string, now = new Date()): TimeGuardStatus {
   const settings = getStrategySettings();
   const utcHour = now.getUTCHours();
   const utcMinute = now.getUTCMinutes();
@@ -160,6 +160,23 @@ export function checkTradingTimeGuard(now = new Date()): TimeGuardStatus {
     localTime: localTimeStr,
     activeSessionsList,
   };
+
+  // فلتر سيولة الجلسات للعملات البديلة (Altcoin Session Liquidity Guard)
+  // يمنع فتح صفقات جديدة على العملات البديلة في ساعات ركود السيولة (22:00 - 06:00 UTC) لتفادي الكسر الكاذب وتصفيات السيولة السريعة
+  const isBtcSymbol = symbol ? symbol.toUpperCase().includes('BTC') : false;
+  if (symbol && !isBtcSymbol && settings.enableAltcoinSessionGuard !== false) {
+    const isAltcoinLowLiquidityHours = utcHour >= 22 || utcHour < 6;
+    if (isAltcoinLowLiquidityHours) {
+      return {
+        isSafe: false,
+        windowName: 'فترة ركود السيولة للعملات البديلة (22:00 - 06:00 UTC)',
+        reason: `الوقت الحالي (${utcTimeStr}) يقع ضمن ساعات ركود وتصفيات العملات البديلة. التداول محصور بالبيتكوين فقط لتفادي الانزلاق والكسر الكاذب.`,
+        utcTime: utcTimeStr,
+        nextSafeTime: '06:00 UTC (افتتاح جلسة لندن/آسيا النشطة)',
+        sessionInfo,
+      };
+    }
+  }
 
   // Optional User-configured strict trading hours override
   if (settings.enableTradingTimeFilter) {
@@ -1417,6 +1434,8 @@ export async function analyzeIntradayMarketData(symbol: string): Promise<Analysi
   const ema200_15m = ema200_15m_arr[ema200_15m_arr.length - 1];
   const ema50_15m_arr = calcEMA(data15m.closes, 50);
   const ema50_15m = ema50_15m_arr[ema50_15m_arr.length - 1];
+  const ema20_15m_arr = calcEMA(data15m.closes, 20);
+  const ema20_15m = ema20_15m_arr[ema20_15m_arr.length - 1];
 
   const rsi_15m_arr = calcRSI(data15m.closes, 14);
   const rsi_15m = rsi_15m_arr[rsi_15m_arr.length - 1];
@@ -1797,7 +1816,15 @@ export async function analyzeIntradayMarketData(symbol: string): Promise<Analysi
   // Priority: 1. Wyckoff Extreme -> 2. Gann Anchor P0 -> 3. ATR Fallback
   // ABSOLUTE RULE: BUY -> SL < Entry | SELL -> SL > Entry
   // ----------------------------------------------------
-  const atrStopDistance = Math.max(2.0 * atr_15m, effectiveEntryPrice * 0.005);
+  const isBtc = symbol.toUpperCase().includes('BTC');
+  // البيتكوين: حركة أنظف وهيكل مؤسسي مستقر (2.0x ATR وهامش 0.5%)
+  // العملات البديلة (Altcoins: ETH, SOL, XLM, SUI...): ذيول تصفية وتذبذب أعلى تتطلب وقفاً أوسع (2.4x ATR وهامش 1.2% لحمايتها من الخروج السريع في 3 دقائق)
+  const isAdaptiveAltcoin = !isBtc && settings.enableAdaptiveAltcoinBuffer !== false;
+  const atrMultiplierForSL = isAdaptiveAltcoin ? 2.4 : 2.0;
+  const minRiskPctForSL = isAdaptiveAltcoin ? 0.012 : 0.005;
+  const antiHuntMultiplier = (settings.antiStopHuntMultiplier || 1.0) * (isAdaptiveAltcoin ? 1.5 : 1.0);
+
+  const atrStopDistance = Math.max(atrMultiplierForSL * atr_15m, effectiveEntryPrice * minRiskPctForSL);
   const structuralSL = calculateStructuralSL(
     targetDir === 'BUY',
     effectiveEntryPrice,
@@ -1805,21 +1832,30 @@ export async function analyzeIntradayMarketData(symbol: string): Promise<Analysi
     atr_15m,
     refPivotPrice,
     wyckoffResult.extremePrice,
-    settings.antiStopHuntMultiplier || 1.0,
+    antiHuntMultiplier,
     settings.enableAntiStopHuntBuffer !== false
   );
 
   let slCalculated = structuralSL.stopLoss;
 
   // Strict Directional Safety Guard for Stop Loss:
-  const minSafeRiskDist = Math.max(effectiveEntryPrice * 0.004, atr_15m * 0.8);
+  const minSafeRiskDist = Math.max(
+    effectiveEntryPrice * (isAdaptiveAltcoin ? 0.010 : 0.004),
+    atr_15m * (isAdaptiveAltcoin ? 1.5 : 0.8)
+  );
   if (targetDir === 'BUY') {
     if (slCalculated >= effectiveEntryPrice - minSafeRiskDist) {
-      slCalculated = effectiveEntryPrice - Math.max(effectiveEntryPrice * 0.006, atr_15m * 1.5);
+      slCalculated = effectiveEntryPrice - Math.max(
+        effectiveEntryPrice * (isAdaptiveAltcoin ? 0.015 : 0.006),
+        atr_15m * (isAdaptiveAltcoin ? 2.2 : 1.5)
+      );
     }
   } else {
     if (slCalculated <= effectiveEntryPrice + minSafeRiskDist) {
-      slCalculated = effectiveEntryPrice + Math.max(effectiveEntryPrice * 0.006, atr_15m * 1.5);
+      slCalculated = effectiveEntryPrice + Math.max(
+        effectiveEntryPrice * (isAdaptiveAltcoin ? 0.015 : 0.006),
+        atr_15m * (isAdaptiveAltcoin ? 2.2 : 1.5)
+      );
     }
   }
 
@@ -2171,7 +2207,49 @@ export async function analyzeIntradayMarketData(symbol: string): Promise<Analysi
     }
   }
 
-  const timeGuard = checkTradingTimeGuard();
+  // 3. فلتر منع مطاردة القمم والقيعان الممتدة (Anti-FOMO & Over-Extension Guard)
+  // يمنع الدخول إذا كان السعر متباعداً بشكل حاد عن متوسط 20 EMA على 15M (> 1.2% للبيتكوين و > 1.8% للعملات البديلة)
+  if (settings.enableAntiFomoGuard !== false && ema20_15m > 0 && (decision === 'BUY' || decision === 'SELL')) {
+    const fomoThresholdPct = isBtc
+      ? (settings.antiFomoMaxExtensionPercent || 1.2)
+      : (settings.antiFomoMaxExtensionPercent ? settings.antiFomoMaxExtensionPercent * 1.5 : 1.8);
+    const ema20DistancePct = ((price - ema20_15m) / ema20_15m) * 100;
+
+    if (decision === 'BUY' && ema20DistancePct > fomoThresholdPct) {
+      decision = 'NO_TRADE';
+      rejected_at_step = 'Anti-FOMO Extension Guard (حظر مطاردة القمم الممتدة)';
+      reason = `⚠️ تم حظر الشراء بواسطة فلتر Anti-FOMO: السعر الحالي ($${price.toFixed(price < 1 ? 6 : 2)}) ممتد بشكل حاد (+${ema20DistancePct.toFixed(2)}% أعلى متوسط 20 EMA على 15M). الشراء عند قمة الحركة يعرض الصفقة للانعكاس السريع والتصحيح. يرجى انتظار إعادة اختبار الدعم (Pullback).`;
+    } else if (decision === 'SELL' && ema20DistancePct < -fomoThresholdPct) {
+      decision = 'NO_TRADE';
+      rejected_at_step = 'Anti-FOMO Extension Guard (حظر مطاردة القيعان الممتدة)';
+      reason = `⚠️ تم حظر البيع بواسطة فلتر Anti-FOMO: السعر الحالي ($${price.toFixed(price < 1 ? 6 : 2)}) هابط وممتد بشكل حاد (-${Math.abs(ema20DistancePct).toFixed(2)}% أسفل متوسط 20 EMA على 15M). البيع عند قاع الموجة يعرض الصفقة للارتداد الصاعد المفاجئ. يرجى انتظار ارتداد تصحيحي.`;
+    }
+  }
+
+  // 4. فلتر تأكيد الشمعة وتجنب الذيول المعاكسة (Adverse Rejection Wick Guard)
+  // يفحص آخر شمعة مكتملة على 15M: يمنع الشراء إذا تشكل نموذج شهاب بيعي (Shooting Star)، ويمنع البيع إذا تشكل نموذج مطرقة شرائية (Hammer)
+  if (settings.enableAdverseWickGuard !== false && data15m.candles.length >= 2 && (decision === 'BUY' || decision === 'SELL')) {
+    const lastClosedCandle15m = data15m.candles[data15m.candles.length - 2];
+    if (lastClosedCandle15m) {
+      const candleRange15m = Math.max(0.000001, lastClosedCandle15m.high - lastClosedCandle15m.low);
+      const upperWick15m = lastClosedCandle15m.high - Math.max(lastClosedCandle15m.open, lastClosedCandle15m.close);
+      const lowerWick15m = Math.min(lastClosedCandle15m.open, lastClosedCandle15m.close) - lastClosedCandle15m.low;
+      const upperWickRatio = (upperWick15m / candleRange15m) * 100;
+      const lowerWickRatio = (lowerWick15m / candleRange15m) * 100;
+
+      if (decision === 'BUY' && upperWickRatio >= 50 && lastClosedCandle15m.close <= lastClosedCandle15m.open) {
+        decision = 'NO_TRADE';
+        rejected_at_step = 'Adverse Rejection Wick Guard (ذيل بيعي رافض على 15M)';
+        reason = `⚠️ تم حظر الشراء بواسطة فلتر الشموع الرافضة: الشمعة المكتملة السابقة على 15M أغلقت بذيل علوي طويل (${upperWickRatio.toFixed(1)}% من المدى - نموذج شهاب بيعي Shooting Star)، مما يؤكد وجود ضغط بيع ومقاومة عند القمة.`;
+      } else if (decision === 'SELL' && lowerWickRatio >= 50 && lastClosedCandle15m.close >= lastClosedCandle15m.open) {
+        decision = 'NO_TRADE';
+        rejected_at_step = 'Adverse Rejection Wick Guard (ذيل شرائي ارتدادي على 15M)';
+        reason = `⚠️ تم حظر البيع بواسطة فلتر الشموع الرافضة: الشمعة المكتملة السابقة على 15M أغلقت بذيل سفلي طويل (${lowerWickRatio.toFixed(1)}% من المدى - نموذج مطرقة شرائية Hammer)، مما يؤكد وجود قوى شرائية ارتدادية تمنع فتح صفقات هبوط.`;
+      }
+    }
+  }
+
+  const timeGuard = checkTradingTimeGuard(symbol);
   if (!timeGuard.isSafe && (decision === 'BUY' || decision === 'SELL')) {
     decision = 'NO_TRADE';
     rejected_at_step = 'Trading Time Guard (مُصفي الوقت الآمن)';

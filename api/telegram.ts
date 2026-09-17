@@ -416,6 +416,10 @@ export async function sendTelegramSignalDirect(payload: DirectSignalPayload): Pr
       ? formatNumberVal(parallelBinancePrice)
       : formattedPrice;
 
+    const numSl = Number(stopLoss);
+    const slDistPct = numEntry > 0 && numSl > 0 ? Math.abs(((numEntry - numSl) / numEntry) * 100) : 0;
+    const formattedSlDist = slDistPct > 0 ? ` (${slDistPct.toFixed(2)}%)` : '';
+
     const message = `${header}
 ════════════════════
 🪙 العملة / الزوج: ${normalizedSymbol}
@@ -424,7 +428,8 @@ ${executionTypeLine}
 💵 السعر اللحظي (OKX): ${formattedPrice}
 🔶 سعر Binance الموازي: ${parallelBinanceVal}
 🎯 الهدف الموحد (TP): ${formattedFinalTp}
-🛑 وقف الخسارة (SL): ${formattedSl}`;
+🛑 وقف الخسارة (SL): ${formattedSl}${formattedSlDist}
+🛡️ إدارة المخاطر: حدد حجم العقد بحيث لا تتجاوز الخسارة 1% من رأس المال`;
 
     const result = await sendTelegramMessage(message);
     if (result.ok) {
