@@ -434,7 +434,7 @@ class BackgroundScannerDaemon {
           continue;
         }
 
-        // 3. المرحلة الأولى: حجز الأرباح ونقل وقف الخسارة إلى +0.5R عند الوصول إلى 50% من مشوار الهدف (أو TP1)
+        // 3. المرحلة الأولى: جني 50% كاش ونقل وقف الخسارة لسعر الدخول (Breakeven) عند وصول السعر إلى 50% من مشوار الهدف (أو TP1)
         const reachedTarget50 = isBuy ? curPrice >= trade.target50Price : curPrice <= trade.target50Price;
         const reachedTp1 = isBuy ? curPrice >= trade.tp1 : curPrice <= trade.tp1;
 
@@ -444,11 +444,9 @@ class BackgroundScannerDaemon {
           trade.trigger1_5AtrHit = true;
           const oldSl = trade.currentStopLoss;
 
-          // نقل الوقف إلى +0.5R ربح مضمون لحجز الأرباح ومنع أي خسارة
-          const halfR = riskDist * 0.5;
-          const lockProfitSl = isBuy ? entry + halfR : entry - halfR;
+          // نقل الوقف إلى سعر الدخول (Breakeven) لمنح ما تبقى من الصفقة مساحة تنفس كاملة لامتصاص أي تصحيح
           const decimalPrecision = curPrice < 1 ? 6 : curPrice < 10 ? 3 : 2;
-          const newSl = Number(lockProfitSl.toFixed(decimalPrecision));
+          const newSl = Number(entry.toFixed(decimalPrecision));
 
           // التأكد من أن الوقف يقع على الجانب الصحيح من السعر الحالي
           const isValidSl = isBuy ? newSl < curPrice : newSl > curPrice;
@@ -456,10 +454,10 @@ class BackgroundScannerDaemon {
 
           if (isValidSl && isBetterSl) {
             trade.currentStopLoss = newSl;
-            trade.stage = 'LOCK_PROFIT_0_5R';
+            trade.stage = 'BREAKEVEN';
             trade.lastTrailingNotifyAt = now;
 
-            console.log(`[Trailing Stop] 🛡️ ${symbol}: 50% Target / TP1 reached! Moving SL to +0.5R Lock Profit $${trade.currentStopLoss}`);
+            console.log(`[Trailing Stop] 🛡️ ${symbol}: 50% Target / TP1 reached! Moving SL to Breakeven $${trade.currentStopLoss}`);
             await sendTelegramTrailingStopUpdate({
               symbol,
               decision: trade.decision,
@@ -468,8 +466,8 @@ class BackgroundScannerDaemon {
               oldStopLoss: oldSl,
               newStopLoss: trade.currentStopLoss,
               targetHitName: 'وصول السعر إلى 50% من مشوار الهدف',
-              stage: 'LOCK_PROFIT_0_5R',
-              reason: 'وصل السعر بنجاح إلى 50% من مشوار الهدف، وتم نقل وقف الخسارة إلى +0.5R لحجز الأرباح وتأمين الصفقة بالكامل.',
+              stage: 'BREAKEVEN',
+              reason: 'وصل السعر بنجاح إلى 50% من مشوار الهدف، يرجى إغلاق 50% من العقود كاش ونقل وقف الخسارة لسعر الدخول لتأمين الصفقة بالكامل.',
             });
             continue;
           }

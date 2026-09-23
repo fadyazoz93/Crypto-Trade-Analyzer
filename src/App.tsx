@@ -397,8 +397,8 @@ export default function App() {
         currentPrice: ticker.price,
         entryPrice: record.entryPrice || ticker.price,
         oldStopLoss: record.stopLoss || 0,
-        newStopLoss: record.lockProfitPrice || record.entryPrice || 0,
-        stage: 'LOCK_PROFIT_0_5R',
+        newStopLoss: record.entryPrice || 0,
+        stage: 'BREAKEVEN',
         targetHitName: 'وصول السعر إلى 50% من مشوار الهدف',
       }).catch(() => {});
     });

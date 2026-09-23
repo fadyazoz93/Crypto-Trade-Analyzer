@@ -531,17 +531,24 @@ export async function sendTelegramTrailingStopUpdate(payload: TrailingStopUpdate
     // في صفقات الشراء (LONG): يستحيل أن يكون الوقف أعلى من أو مساوياً للسعر الحالي
     if (isBuy && actualNewStopLoss >= currentPrice) {
       console.warn(`[Trailing Safety] Invariant violation: New SL ${actualNewStopLoss} >= currentPrice ${currentPrice} in BUY. Correcting below price.`);
-      actualNewStopLoss = Number(Math.min(entryPrice, currentPrice * 0.997).toFixed(currentPrice < 1 ? 6 : 4));
+      actualNewStopLoss = Number(Math.min(entryPrice, currentPrice * 0.997).toFixed(currentPrice < 1 ? 6 : currentPrice < 10 ? 3 : 2));
     }
     // في صفقات البيع (SHORT): يستحيل أن يكون الوقف أقل من أو مساوياً للسعر الحالي
     if (!isBuy && actualNewStopLoss <= currentPrice) {
       console.warn(`[Trailing Safety] Invariant violation: New SL ${actualNewStopLoss} <= currentPrice ${currentPrice} in SELL. Correcting above price.`);
-      actualNewStopLoss = Number(Math.max(entryPrice, currentPrice * 1.003).toFixed(currentPrice < 1 ? 6 : 4));
+      actualNewStopLoss = Number(Math.max(entryPrice, currentPrice * 1.003).toFixed(currentPrice < 1 ? 6 : currentPrice < 10 ? 3 : 2));
     }
 
     let parallelBinancePrice = binancePrice;
     if (parallelBinancePrice === undefined || parallelBinancePrice === null) {
       parallelBinancePrice = await fetchBinanceTickerPrice(normalizedSymbol) ?? undefined;
+    }
+
+    const isLockProfit = stage === 'LOCK_PROFIT_0_5R' || stage === 'BREAKEVEN' || stage === 'TRAILING_50_LOCK';
+
+    // في تحديث الأمان عند 50% من الهدف، الوقف الجديد يكون دائماً سعر الدخول لحماية الصفقة ومنحها مساحة تنفس كاملة
+    if (isLockProfit) {
+      actualNewStopLoss = entryPrice;
     }
 
     const formattedCurPrice = formatNumberVal(currentPrice);
@@ -552,10 +559,8 @@ export async function sendTelegramTrailingStopUpdate(payload: TrailingStopUpdate
       ? formatNumberVal(parallelBinancePrice)
       : formattedCurPrice;
 
-    const isLockProfit = stage === 'LOCK_PROFIT_0_5R' || stage === 'BREAKEVEN' || stage === 'TRAILING_50_LOCK';
-
     const actionHeader = isLockProfit
-      ? `🛡️ <b>تحديث أمان: حجز الأرباح ونقل وقف الخسارة (Lock Profit)</b>`
+      ? `🛡️ <b>تحديث أمان: جني 50% أرباح ونقل وقف الخسارة لسعر الدخول (Breakeven)</b>`
       : `🚀 <b>تحديث أرباح: حجز الأرباح وتعديل الوقف (Stop Trailing)</b>`;
 
     const statusBadge = isBuy ? `🟢 شراء (LONG)` : `🔴 بيع (SHORT)`;
@@ -572,9 +577,10 @@ export async function sendTelegramTrailingStopUpdate(payload: TrailingStopUpdate
 🔶 <b>سعر Binance الموازي:</b> ${parallelBinanceVal}
 ════════════════════
 🎯 <b>المستوى المحقق:</b> وصول السعر إلى 50% من مشوار الهدف
+💰 <b>جني الأرباح الجزئي:</b> إغلاق 50% من العقود كاش الآن
 ❌ <b>وقف الخسارة السابق (Old SL):</b> ${formattedOldSl}
-🚨 <b>وقف الخسارة الجديد للتعديل فوراً (New SL):</b> ${formattedNewSl}
-🛡️ <b>إدارة المخاطر:</b> تم تأمين الصفقة بربح مضمون ومنع الخسارة تماماً.`;
+🚨 <b>وقف الخسارة الجديد للتعديل فوراً (New SL):</b> <b>${formattedNewSl} (سعر الدخول)</b>
+🛡️ <b>إدارة المخاطر:</b> تم تأمين ربح نقدي وحماية ما تبقى من الصفقة مع ترك مساحة تنفس كاملة للتصحيح نحو الهدف النهائي.`;
     } else {
       message = `${actionHeader}
 ════════════════════

@@ -232,8 +232,8 @@ ${matrix ? `درجة التوافق: ${matrix.totalScore}/100 (${matrix.grade})`
               currentPrice: livePrice,
               entryPrice: record.entryPrice || livePrice,
               oldStopLoss: record.stopLoss || 0,
-              newStopLoss: record.lockProfitPrice || record.entryPrice || 0,
-              stage: 'LOCK_PROFIT_0_5R',
+              newStopLoss: record.entryPrice || 0,
+              stage: 'BREAKEVEN',
               targetHitName: 'وصول السعر إلى 50% من مشوار الهدف',
             }).catch(() => {});
           });
