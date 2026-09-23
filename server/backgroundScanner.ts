@@ -34,7 +34,7 @@ export interface TrackedActiveTrade {
   trigger1_5AtrHit: boolean;
   highestPrice: number;
   lowestPrice: number;
-  stage: 'INITIAL' | 'BREAKEVEN' | 'TRAILING_LOCK_1' | 'TRAILING_LOCK_2' | 'TRAILING_50_LOCK' | 'CLOSED';
+  stage: 'INITIAL' | 'BREAKEVEN' | 'LOCK_PROFIT_0_5R' | 'TRAILING_LOCK_1' | 'TRAILING_LOCK_2' | 'TRAILING_50_LOCK' | 'CLOSED';
   lastTrailingNotifyAt?: number;
   createdAt: number;
 }
@@ -307,7 +307,7 @@ class BackgroundScannerDaemon {
                     ? entryP + (1.5 * atrVal)
                     : entryP - (1.5 * atrVal);
 
-                  const decimalP = curPrice < 1 ? 6 : 4;
+                  const decimalP = curPrice < 1 ? 6 : curPrice < 10 ? 3 : 2;
 
                   this.activeTrades.set(symbol, {
                     symbol,
@@ -434,19 +434,21 @@ class BackgroundScannerDaemon {
           continue;
         }
 
-        // 3. المرحلة الأولى: نقل وقف الخسارة إلى الدخول (Breakeven - Risk Free)
-        // يُفعَّل التنبيه وتحريك الوقف عند وصول السعر إلى 1.5 ATR (أو تحقيق TP1) لتأمين الصفقة بالكامل
-        const reached1_5Atr = isBuy ? curPrice >= trade.trigger1_5AtrPrice : curPrice <= trade.trigger1_5AtrPrice;
+        // 3. المرحلة الأولى: حجز الأرباح ونقل وقف الخسارة إلى +0.5R عند الوصول إلى 50% من مشوار الهدف (أو TP1)
+        const reachedTarget50 = isBuy ? curPrice >= trade.target50Price : curPrice <= trade.target50Price;
         const reachedTp1 = isBuy ? curPrice >= trade.tp1 : curPrice <= trade.tp1;
 
-        if ((reached1_5Atr || reachedTp1) && trade.stage === 'INITIAL' && !trade.trigger1_5AtrHit && !trade.tp1Hit) {
-          trade.trigger1_5AtrHit = true;
+        if ((reachedTarget50 || reachedTp1) && trade.stage === 'INITIAL' && !trade.halfway50Hit && !trade.tp1Hit) {
+          trade.halfway50Hit = true;
           trade.tp1Hit = true;
+          trade.trigger1_5AtrHit = true;
           const oldSl = trade.currentStopLoss;
-          // نقل الوقف للدخول مع هامش وقائي ضئيل لتغطية رسوم المنصة (+0.05% في اتجاه الصفقة)
-          // هذا يضمن أن الوقف الجديد يقع دائماً خلف السعر الحالي بمسافة 1.5 ATR كاملة
-          const breakevenSl = isBuy ? entry * 1.0005 : entry * 0.9995;
-          const newSl = Number(breakevenSl.toFixed(curPrice < 1 ? 6 : 4));
+
+          // نقل الوقف إلى +0.5R ربح مضمون لحجز الأرباح ومنع أي خسارة
+          const halfR = riskDist * 0.5;
+          const lockProfitSl = isBuy ? entry + halfR : entry - halfR;
+          const decimalPrecision = curPrice < 1 ? 6 : curPrice < 10 ? 3 : 2;
+          const newSl = Number(lockProfitSl.toFixed(decimalPrecision));
 
           // التأكد من أن الوقف يقع على الجانب الصحيح من السعر الحالي
           const isValidSl = isBuy ? newSl < curPrice : newSl > curPrice;
@@ -454,10 +456,10 @@ class BackgroundScannerDaemon {
 
           if (isValidSl && isBetterSl) {
             trade.currentStopLoss = newSl;
-            trade.stage = 'BREAKEVEN';
+            trade.stage = 'LOCK_PROFIT_0_5R';
             trade.lastTrailingNotifyAt = now;
 
-            console.log(`[Trailing Stop] 🛡️ ${symbol}: 1.5 ATR / TP1 reached! Moving SL to Breakeven $${trade.currentStopLoss}`);
+            console.log(`[Trailing Stop] 🛡️ ${symbol}: 50% Target / TP1 reached! Moving SL to +0.5R Lock Profit $${trade.currentStopLoss}`);
             await sendTelegramTrailingStopUpdate({
               symbol,
               decision: trade.decision,
@@ -465,18 +467,17 @@ class BackgroundScannerDaemon {
               entryPrice: entry,
               oldStopLoss: oldSl,
               newStopLoss: trade.currentStopLoss,
-              targetHitName: reached1_5Atr ? 'وصول السعر إلى 1.5 ATR (قطع مسافة الزخم المطلوبة)' : 'الهدف الأول TP1 (+0.5R)',
-              stage: 'BREAKEVEN',
-              reason: 'تحرك السعر مسافة 1.5 ATR في اتجاه الصفقة بنجاح، وتم نقل وقف الخسارة تلقائياً إلى نقطة الدخول لتأمين الصفقة بالكامل (Risk-Free Trade).',
+              targetHitName: 'وصول السعر إلى 50% من مشوار الهدف',
+              stage: 'LOCK_PROFIT_0_5R',
+              reason: 'وصل السعر بنجاح إلى 50% من مشوار الهدف، وتم نقل وقف الخسارة إلى +0.5R لحجز الأرباح وتأمين الصفقة بالكامل.',
             });
             continue;
           }
         }
 
-        // 4. المرحلة الثانية: نقل الوقف لنصف مشوار الهدف (50% Trailing SL)
-        // يُفعَّل عندما يصل السعر فعلياً إلى 50% من مشوار الصفقة نحو الهدف النهائي (Target 50% Midpoint)
-        const reachedTarget50 = isBuy ? curPrice >= trade.target50Price : curPrice <= trade.target50Price;
-        if (reachedTarget50 && !trade.halfway50Hit && (trade.stage === 'BREAKEVEN' || trade.stage === 'INITIAL')) {
+        // 4. المرحلة الثانية: نقل الوقف وتتبعه مع الأرباح المتقدمة (Trailing SL)
+        // يُفعَّل عندما يواصل السعر مساره بعد 50% نحو الأهداف المتقدمة
+        if (reachedTarget50 && (trade.stage === 'LOCK_PROFIT_0_5R' || trade.stage === 'BREAKEVEN')) {
           trade.halfway50Hit = true;
           const oldSl = trade.currentStopLoss;
 

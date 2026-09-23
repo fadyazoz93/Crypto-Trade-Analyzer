@@ -164,6 +164,12 @@ export function formatNumberVal(val: number | string | undefined | null): string
   if (num < 1 && num > 0) {
     return `$${num.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 6 })}`;
   }
+  if (num >= 10) {
+    return `$${num.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  }
+  if (num >= 1) {
+    return `$${num.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 4 })}`;
+  }
   if (Number.isInteger(num)) {
     return `$${num}`;
   }
