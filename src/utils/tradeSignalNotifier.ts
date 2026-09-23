@@ -11,6 +11,10 @@ export interface NotifiedSignalRecord {
   decision: 'BUY' | 'SELL';
   entryPrice?: number;
   stopLoss?: number;
+  targetPrice?: number;
+  target50PercentPrice?: number;
+  lockProfitPrice?: number;
+  securityUpdateSent?: boolean;
   sentAt: number;
   channels: ('BROWSER' | 'TELEGRAM' | 'AUDIO')[];
 }
@@ -180,7 +184,10 @@ class TradeSignalNotificationManager {
     decision: 'BUY' | 'SELL',
     channel: 'BROWSER' | 'TELEGRAM' | 'AUDIO',
     entryPrice?: number,
-    stopLoss?: number
+    stopLoss?: number,
+    targetPrice?: number,
+    target50PercentPrice?: number,
+    lockProfitPrice?: number
   ) {
     const key = this.getKey(symbol, decision);
     const existing = this.inMemoryRegistry.get(key);
@@ -192,6 +199,9 @@ class TradeSignalNotificationManager {
       existing.sentAt = Date.now();
       if (entryPrice) existing.entryPrice = entryPrice;
       if (stopLoss) existing.stopLoss = stopLoss;
+      if (targetPrice) existing.targetPrice = targetPrice;
+      if (target50PercentPrice) existing.target50PercentPrice = target50PercentPrice;
+      if (lockProfitPrice) existing.lockProfitPrice = lockProfitPrice;
       this.inMemoryRegistry.set(key, existing);
     } else {
       this.inMemoryRegistry.set(key, {
@@ -199,12 +209,47 @@ class TradeSignalNotificationManager {
         decision,
         entryPrice,
         stopLoss,
+        targetPrice,
+        target50PercentPrice,
+        lockProfitPrice,
+        securityUpdateSent: false,
         sentAt: Date.now(),
         channels: [channel],
       });
     }
 
     this.saveToStorage();
+  }
+
+  /**
+   * فحص وصول السعر اللحظي إلى 50% من مشوار الهدف لإرسال رسالة تحديث الأمان المستقلة
+   */
+  public checkAndTriggerSecurityUpdate(
+    symbol: string,
+    currentPrice: number,
+    onTrigger: (record: NotifiedSignalRecord) => void
+  ) {
+    if (!currentPrice || currentPrice <= 0) return;
+    const cleanSym = String(symbol || '').replace(/[-_ /]/g, '').trim().toUpperCase();
+
+    ['BUY', 'SELL'].forEach((dir) => {
+      const key = `${cleanSym}_${dir}`;
+      const record = this.inMemoryRegistry.get(key);
+      if (!record || record.securityUpdateSent) return;
+
+      const isBuy = record.decision === 'BUY';
+      const target50 = record.target50PercentPrice;
+      const lockSl = record.lockProfitPrice;
+      if (!target50 || !lockSl) return;
+
+      // تحقق من وصول السعر إلى 50% من الهدف
+      const reached = isBuy ? currentPrice >= target50 : currentPrice <= target50;
+      if (reached) {
+        record.securityUpdateSent = true;
+        this.saveToStorage();
+        onTrigger(record);
+      }
+    });
   }
 
   /**

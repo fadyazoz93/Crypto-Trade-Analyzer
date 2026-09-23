@@ -2,7 +2,8 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { SymbolInfo, ScanItemResult, TradingMode, AnalysisResult } from '../types';
 import { scanMultipleSymbols, reEvaluateWithLivePrice } from '../utils/technicalAnalysis';
 import { sendTradeNotification } from '../utils/browserNotifications';
-import { sendTelegramSignal } from '../utils/telegramNotifications';
+import { sendTelegramSignal, sendTelegramSecurityUpdate } from '../utils/telegramNotifications';
+import { signalNotificationManager } from '../utils/tradeSignalNotifier';
 import { useOkxAllTickersWebSocket } from '../utils/useOkxWebSocket';
 import { 
   Play, 
@@ -222,6 +223,20 @@ ${matrix ? `درجة التوافق: ${matrix.totalScore}/100 (${matrix.grade})`
         const livePrice = tickersMap[item.symbol];
         if (livePrice && livePrice > 0 && livePrice !== item.price) {
           changed = true;
+
+          // Check if any active trade signal for this coin reached 50% target to send separate Security Update
+          signalNotificationManager.checkAndTriggerSecurityUpdate(item.symbol, livePrice, (record) => {
+            sendTelegramSecurityUpdate({
+              symbol: record.symbol,
+              decision: record.decision,
+              currentPrice: livePrice,
+              entryPrice: record.entryPrice || livePrice,
+              oldStopLoss: record.stopLoss || 0,
+              newStopLoss: record.lockProfitPrice || record.entryPrice || 0,
+              stage: 'LOCK_PROFIT_0_5R',
+              targetHitName: 'وصول السعر إلى 50% من مشوار الهدف',
+            }).catch(() => {});
+          });
           if (item.analysis) {
             // Re-evaluate strategy conditions with new live WebSocket price
             const updatedAnalysis = reEvaluateWithLivePrice(item.analysis, livePrice);

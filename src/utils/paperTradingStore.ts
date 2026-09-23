@@ -2,6 +2,7 @@ import { savePortfolioToTurso, getPortfolioFromTurso } from './tursoSync';
 import { getStrategySettings } from './settingsStore';
 import { calculateInstitutionalRiskSizing, orderCalcProfit, getContractSpec } from './institutionalRiskEngine';
 import { checkEconomicCalendarNewsLock } from './economicCalendarService';
+import { sendTelegramSecurityUpdate } from './telegramNotifications';
 import { AnalysisResult } from '../types';
 
 /**
@@ -683,20 +684,57 @@ export function updateTradeWithLiveTick(
     }
 
     // ----------------------------------------------------
-    // 2. AUTO BREAK-EVEN (1:1 R:R Threshold)
+    // 2. LOCK PROFIT AT 50% TARGET (+0.5R Lock) / AUTO BREAK-EVEN
     // ----------------------------------------------------
     const riskDistance = Math.abs(trade.entryPrice - (trade.originalStopLoss || trade.stopLoss));
     const favorableDistance = isBuy ? high - trade.entryPrice : trade.entryPrice - low;
     const breakEvenThresholdDistance = riskDistance * (settings.breakEvenRatio || 1.0);
 
-    if (settings.enableBreakEven && !isBreakEvenTriggered && favorableDistance >= breakEvenThresholdDistance) {
+    const targetDistance = Math.abs(trade.takeProfit2 - trade.entryPrice);
+    const midwayDistance = targetDistance * 0.5;
+    const isMidwayReached = targetDistance > 0 && favorableDistance >= midwayDistance;
+
+    if (settings.enableEarlyBreakevenAlert !== false && !isBreakEvenTriggered && isMidwayReached) {
+      const halfR = riskDistance * 0.5;
+      const profitLockLevel = isBuy ? trade.entryPrice + halfR : trade.entryPrice - halfR;
+      const oldSl = currentStopLoss;
+      currentStopLoss = Number(profitLockLevel.toFixed(trade.entryPrice < 1 ? 6 : 2));
+      isBreakEvenTriggered = true;
+      breakEvenPrice = currentStopLoss;
+      breakEvenTime = new Date().toLocaleTimeString('ar-EG');
+
+      // إرسال رسالة تحديث الأمان المستقلة إلى تليجرام فوراً
+      sendTelegramSecurityUpdate({
+        symbol: trade.symbol,
+        decision: trade.type,
+        currentPrice: livePrice,
+        entryPrice: trade.entryPrice,
+        oldStopLoss: oldSl,
+        newStopLoss: currentStopLoss,
+        stage: 'LOCK_PROFIT_0_5R',
+        targetHitName: 'وصول السعر إلى 50% من مشوار الهدف',
+      }).catch(() => {});
+    } else if (settings.enableBreakEven && !isBreakEvenTriggered && favorableDistance >= breakEvenThresholdDistance) {
       const buffer = (settings.breakEvenFeeBufferPercent || 0.05) / 100;
       const beLevel = isBuy ? trade.entryPrice * (1 + buffer) : trade.entryPrice * (1 - buffer);
       if ((isBuy && beLevel > currentStopLoss) || (!isBuy && beLevel < currentStopLoss)) {
+        const oldSl = currentStopLoss;
         currentStopLoss = Number(beLevel.toFixed(trade.entryPrice < 1 ? 6 : 2));
         isBreakEvenTriggered = true;
         breakEvenPrice = currentStopLoss;
         breakEvenTime = new Date().toLocaleTimeString('ar-EG');
+
+        // إرسال رسالة تحديث الأمان المستقلة إلى تليجرام فوراً
+        sendTelegramSecurityUpdate({
+          symbol: trade.symbol,
+          decision: trade.type,
+          currentPrice: livePrice,
+          entryPrice: trade.entryPrice,
+          oldStopLoss: oldSl,
+          newStopLoss: currentStopLoss,
+          stage: 'BREAKEVEN',
+          targetHitName: 'نقطة الدخول (Breakeven)',
+        }).catch(() => {});
       }
     }
 

@@ -60,7 +60,10 @@ export async function sendTelegramSignal(data: TelegramSignalData): Promise<bool
       data.decision,
       'TELEGRAM',
       data.entryPrice,
-      data.stopLoss
+      data.stopLoss,
+      data.takeProfit || data.takeProfit1,
+      data.target50PercentPrice,
+      data.lockProfitPrice
     );
   }
 
@@ -143,3 +146,40 @@ export async function getTelegramStatus(): Promise<{ connected: boolean; bot?: a
     return { connected: false };
   }
 }
+
+export interface TelegramSecurityUpdateData {
+  symbol: string;
+  decision: 'BUY' | 'SELL';
+  currentPrice: number;
+  entryPrice: number;
+  oldStopLoss: number;
+  newStopLoss: number;
+  stage: 'BREAKEVEN' | 'LOCK_PROFIT_0_5R' | 'TRAILING_LOCK' | 'TRAILING_50_LOCK';
+  targetHitName?: string;
+  reason?: string;
+  binancePrice?: number;
+}
+
+export async function sendTelegramSecurityUpdate(data: TelegramSecurityUpdateData): Promise<boolean> {
+  try {
+    const res = await fetch('/api/telegram?action=send_trailing_stop', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(data),
+    });
+
+    if (!res.ok) {
+      console.warn('Failed to send Telegram security update:', res.statusText);
+      return false;
+    }
+
+    const result = await res.json();
+    return Boolean(result?.success);
+  } catch (err) {
+    console.error('Error sending Telegram security update:', err);
+    return false;
+  }
+}
+

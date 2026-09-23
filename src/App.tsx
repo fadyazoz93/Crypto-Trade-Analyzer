@@ -4,7 +4,7 @@ import { POPULAR_SYMBOLS, fetchTopVolumeSymbols, analyzeMarketData, reEvaluateWi
 import { useOkxSymbolWebSocket } from './utils/useOkxWebSocket';
 import { playSignalChime } from './utils/audioAlert';
 import { getNotificationPermission, requestNotificationPermission, sendTradeNotification } from './utils/browserNotifications';
-import { sendTelegramSignal } from './utils/telegramNotifications';
+import { sendTelegramSignal, sendTelegramSecurityUpdate } from './utils/telegramNotifications';
 import { signalNotificationManager } from './utils/tradeSignalNotifier';
 import { saveSignalToTurso, getSignalsFromTurso, clearSignalsFromTurso, checkTursoConnection, getSettingsFromTurso, getCustomSymbolsFromTurso, saveCustomSymbolsToTurso } from './utils/tursoSync';
 import { fetchPaperPortfolioFromTurso, getPaperPortfolio, savePaperPortfolio } from './utils/paperTradingStore';
@@ -388,6 +388,20 @@ export default function App() {
   // Re-evaluate 4T conditions in memory when live WebSocket price tick arrives
   useEffect(() => {
     if (!ticker || !ticker.price || ticker.price <= 0) return;
+
+    // Check if any active trade signal for this coin reached 50% target to send separate Security Update
+    signalNotificationManager.checkAndTriggerSecurityUpdate(ticker.symbol, ticker.price, (record) => {
+      sendTelegramSecurityUpdate({
+        symbol: record.symbol,
+        decision: record.decision,
+        currentPrice: ticker.price,
+        entryPrice: record.entryPrice || ticker.price,
+        oldStopLoss: record.stopLoss || 0,
+        newStopLoss: record.lockProfitPrice || record.entryPrice || 0,
+        stage: 'LOCK_PROFIT_0_5R',
+        targetHitName: 'وصول السعر إلى 50% من مشوار الهدف',
+      }).catch(() => {});
+    });
 
     setResult((prevResult) => {
       if (!prevResult || prevResult.symbol !== ticker.symbol) return prevResult;
