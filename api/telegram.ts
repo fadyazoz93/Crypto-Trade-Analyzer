@@ -546,48 +546,29 @@ export async function sendTelegramTrailingStopUpdate(payload: TrailingStopUpdate
       ? formatNumberVal(parallelBinancePrice)
       : formattedCurPrice;
 
-    const actionHeader = stage === 'LOCK_PROFIT_0_5R'
-      ? `🛡️ <b>تحديث أمان: حجز الأرباح ونقل الوقف إلى +0.5R (Lock Profit)</b>`
-      : stage === 'BREAKEVEN'
-      ? `🛡️ <b>تحديث أمان: نقل وقف الخسارة لنقطة الدخول (Breakeven)</b>`
-      : stage === 'TRAILING_50_LOCK'
-      ? `🎯 <b>تحديث ذكي: نقل الوقف لنصف مشوار الهدف (50% Trailing SL)</b>`
+    const isLockProfit = stage === 'LOCK_PROFIT_0_5R' || stage === 'BREAKEVEN' || stage === 'TRAILING_50_LOCK';
+
+    const actionHeader = isLockProfit
+      ? `🛡️ <b>تحديث أمان: حجز الأرباح ونقل وقف الخسارة (Lock Profit)</b>`
       : `🚀 <b>تحديث أرباح: حجز الأرباح وتعديل الوقف (Stop Trailing)</b>`;
 
     const statusBadge = isBuy ? `🟢 شراء (LONG)` : `🔴 بيع (SHORT)`;
 
-    const slActionArabic = isBuy
-      ? (stage === 'BREAKEVEN' ? 'نقل الوقف لسعر الدخول (تأمين)' : stage === 'LOCK_PROFIT_0_5R' ? 'رفع الوقف فوراً لحجز ربح +0.5R وتأمين الصفقة ⬆️' : 'رفع الوقف لحجز الأرباح ⬆️')
-      : (stage === 'BREAKEVEN' ? 'نقل الوقف لسعر الدخول (تأمين)' : stage === 'LOCK_PROFIT_0_5R' ? 'خفض الوقف فوراً لحجز ربح +0.5R وتأمين الصفقة ⬇️' : 'خفض الوقف لحجز الأرباح ⬇️');
-
     let message = '';
-    if (stage === 'LOCK_PROFIT_0_5R') {
+    if (isLockProfit) {
       message = `${actionHeader}
 ════════════════════
 🪙 <b>العملة / الزوج:</b> <code>${normalizedSymbol}</code>
 🧭 <b>نوع الصفقة:</b> ${statusBadge}
 ════════════════════
 📍 <b>سعر الدخول:</b> ${formattedEntry}
-💵 <b>السعر الحالي (OKX):</b> ${formattedCurPrice}
+💵 <b>السعر اللحظي (OKX):</b> ${formattedCurPrice}
 🔶 <b>سعر Binance الموازي:</b> ${parallelBinanceVal}
+════════════════════
 🎯 <b>المستوى المحقق:</b> وصول السعر إلى 50% من مشوار الهدف
-════════════════════
-❌ <b>وقف الخسارة السابق (Old SL):</b> ${formattedOldSl}
-🚨 <b>وقف الخسارة الجديد للتعديل فوراً (New SL):</b> <b>${formattedNewSl} (+0.5R ربح مضمون)</b>
-⚙️ <b>الإجراء المطلوب:</b> ${slActionArabic}`;
-    } else if (stage === 'BREAKEVEN') {
-      message = `${actionHeader}
-════════════════════
-🪙 <b>العملة / الزوج:</b> <code>${normalizedSymbol}</code>
-🧭 <b>نوع الصفقة:</b> ${statusBadge}
-════════════════════
-📍 <b>سعر الدخول:</b> ${formattedEntry}
-💵 <b>السعر الحالي (OKX):</b> ${formattedCurPrice}
-🔶 <b>سعر Binance الموازي:</b> ${parallelBinanceVal}
-════════════════════
 ❌ <b>وقف الخسارة السابق (Old SL):</b> ${formattedOldSl}
 🚨 <b>وقف الخسارة الجديد للتعديل فوراً (New SL):</b> ${formattedNewSl}
-⚙️ <b>الإجراء المطلوب:</b> ${slActionArabic}`;
+🛡️ <b>إدارة المخاطر:</b> تم تأمين الصفقة بربح مضمون ومنع الخسارة تماماً.`;
     } else {
       message = `${actionHeader}
 ════════════════════
@@ -599,9 +580,8 @@ export async function sendTelegramTrailingStopUpdate(payload: TrailingStopUpdate
 🔶 <b>سعر Binance الموازي:</b> ${parallelBinanceVal}
 ════════════════════
 ❌ <b>وقف الخسارة السابق (Old SL):</b> ${formattedOldSl}
-🚨 <b>وقف الخسارة الجديد للتعديل فوراً (New SL):</b>
-${formattedNewSl}
-⚙️ <b>الإجراء المطلوب:</b> ${slActionArabic}`;
+🚨 <b>وقف الخسارة الجديد للتعديل فوراً (New SL):</b> <b>${formattedNewSl}</b>
+⚙️ <b>الإجراء المطلوب:</b> ${isBuy ? 'رفع الوقف لحجز الأرباح ⬆️' : 'خفض الوقف لحجز الأرباح ⬇️'}`;
     }
 
     const result = await sendTelegramMessage(message);
