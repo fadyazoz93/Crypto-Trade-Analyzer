@@ -420,6 +420,30 @@ export async function sendTelegramSignalDirect(payload: DirectSignalPayload): Pr
     const slDistPct = numEntry > 0 && numSl > 0 ? Math.abs(((numEntry - numSl) / numEntry) * 100) : 0;
     const formattedSlDist = slDistPct > 0 ? ` (${slDistPct.toFixed(2)}%)` : '';
 
+    // حساب مستوى 50% من مشوار الهدف ومستوى حجز الربح عند +0.5R (بدلاً من الاكتفاء بسعر الدخول)
+    const numTp = Number(takeProfit || takeProfit1 || numEntry);
+    let midwayTpVal: number | undefined = (payload as any)?.target50PercentPrice ? Number((payload as any).target50PercentPrice) : undefined;
+    if (!midwayTpVal || isNaN(midwayTpVal)) {
+      if (numEntry > 0 && numTp > 0) {
+        midwayTpVal = isBuy ? numEntry + (numTp - numEntry) * 0.5 : numEntry - (numEntry - numTp) * 0.5;
+      }
+    }
+
+    let profitLockVal: number | undefined = (payload as any)?.lockProfitPrice ? Number((payload as any).lockProfitPrice) : undefined;
+    if (!profitLockVal || isNaN(profitLockVal)) {
+      if (numEntry > 0 && numSl > 0) {
+        const halfR = Math.abs(numEntry - numSl) * 0.5;
+        profitLockVal = isBuy ? numEntry + halfR : numEntry - halfR;
+      }
+    }
+
+    const formattedMidwayTp = (midwayTpVal && midwayTpVal > 0) ? formatNumberVal(midwayTpVal) : null;
+    const formattedProfitLock = (profitLockVal && profitLockVal > 0) ? formatNumberVal(profitLockVal) : null;
+
+    const lockProfitAdviceLine = (formattedMidwayTp && formattedProfitLock)
+      ? `\n💰 حجز الأرباح (Lock Profit): عند وصول السعر إلى ${formattedMidwayTp} (50% من الهدف) ارفع الوقف فوراً إلى ${formattedProfitLock} (+0.5R) لضمان الخروج بربح مؤكد وحماية الصفقة من الانعكاس`
+      : '';
+
     const message = `${header}
 ════════════════════
 🪙 العملة / الزوج: ${normalizedSymbol}
@@ -428,7 +452,7 @@ ${executionTypeLine}
 💵 السعر اللحظي (OKX): ${formattedPrice}
 🔶 سعر Binance الموازي: ${parallelBinanceVal}
 🎯 الهدف الموحد (TP): ${formattedFinalTp}
-🛑 وقف الخسارة (SL): ${formattedSl}${formattedSlDist}
+🛑 وقف الخسارة (SL): ${formattedSl}${formattedSlDist}${lockProfitAdviceLine}
 🛡️ إدارة المخاطر: حدد حجم العقد بحيث لا تتجاوز الخسارة 1% من رأس المال`;
 
     const result = await sendTelegramMessage(message);

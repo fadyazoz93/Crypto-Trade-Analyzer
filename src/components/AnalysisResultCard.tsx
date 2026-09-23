@@ -550,9 +550,11 @@ export const AnalysisResultCard: React.FC<AnalysisResultCardProps> = ({ result, 
             <div className="flex items-center gap-2">
               <Zap className="w-4 h-4 text-amber-400 shrink-0" />
               <div>
-                <div className="text-slate-400 font-medium text-[11px]">تأمين الدخول (Break-Even):</div>
-                <div className="font-mono font-extrabold text-amber-300">
-                  تلقائي عند وصول 1:1 R:R ({trade_setup.breakEvenPrice ? `$${trade_setup.breakEvenPrice}` : 'مفعّل'})
+                <div className="text-slate-400 font-medium text-[11px]">حجز الأرباح المضمونة (Lock Profit +0.5R):</div>
+                <div className="font-mono font-extrabold text-amber-300 text-xs">
+                  {trade_setup.target50PercentPrice && (trade_setup.quadScaleOut?.tp1_0_5r || trade_setup.beTriggerPrice)
+                    ? `عند $${trade_setup.target50PercentPrice} (50% TP) ارفع الوقف إلى $${trade_setup.quadScaleOut?.tp1_0_5r || trade_setup.beTriggerPrice} (+0.5R)`
+                    : `رفع الوقف إلى +0.5R عند تحقيق 50% من الهدف`}
                 </div>
               </div>
             </div>

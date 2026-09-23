@@ -8,6 +8,7 @@ import { fetchOkxCandles, fetchOkxTicker, fetchOkxTopVolumeTickers, toOkxInstId,
  * يفحص اتجاه BTC-USDT لتفادي أخذ صفقات شراء للعملات البديلة أثناء الهبوط الحاد للبتكوين
  */
 export async function checkBtcCorrelationGuard(): Promise<BtcGuardStatus> {
+  const settings = getStrategySettings();
   try {
     const btcTicker = await fetchOkxTicker('BTC-USDT');
 
@@ -15,6 +16,7 @@ export async function checkBtcCorrelationGuard(): Promise<BtcGuardStatus> {
       const btcPrice = btcTicker.lastPrice;
       const btc24hChange = btcTicker.priceChangePercent;
 
+      // 1. فحص الهبوط اليومي الحاد للبيتكوين (Daily Dump)
       if (btc24hChange <= -3.0) {
         return {
           isBtcSafe: false,
@@ -23,7 +25,35 @@ export async function checkBtcCorrelationGuard(): Promise<BtcGuardStatus> {
           btc24hChange,
           message: `⚠️ تحذير BTC Guard (OKX): البتكوين يمر بموجة هبوط حادة (${btc24hChange.toFixed(2)}%)! تم تفعيل الحظر الوقائي لصفقات الشراء على العملات البديلة.`,
         };
-      } else if (btc24hChange >= 1.5) {
+      }
+
+      // 2. فحص الهبوط اللحظي الحاد على فريم 15 دقيقة (Intraday 15M BTC Flash Drop)
+      if (settings.enableBtc15mIntradayGuard !== false) {
+        try {
+          const btc15mData = await fetchOkxCandles('BTC-USDT', '15m', 6);
+          if (btc15mData && btc15mData.candles && btc15mData.candles.length >= 3) {
+            // الشمعة المغلقة الأخيرة
+            const lastClosed = btc15mData.candles[btc15mData.candles.length - 2];
+            if (lastClosed && lastClosed.open > 0) {
+              const candle15mChange = ((lastClosed.close - lastClosed.open) / lastClosed.open) * 100;
+              // إذا هبطت شمعة الـ 15 دقيقة بأكثر من 0.85%
+              if (candle15mChange <= -0.85) {
+                return {
+                  isBtcSafe: false,
+                  btcTrend: 'BEARISH_DUMP',
+                  btcPrice,
+                  btc24hChange,
+                  message: `⚠️ تحذير BTC 15M Intraday Guard: البتكوين يتعرض لهبوط حاد لحظي على فريم 15M (${candle15mChange.toFixed(2)}%)! تم حظر شراء العملات البديلة مؤقتاً لحين استقرار الشمعة.`,
+                };
+              }
+            }
+          }
+        } catch {
+          // هدوء واستمرار بدون تعطيل
+        }
+      }
+
+      if (btc24hChange >= 1.5) {
         return {
           isBtcSafe: true,
           btcTrend: 'BULLISH',
@@ -1859,6 +1889,23 @@ export async function analyzeIntradayMarketData(symbol: string): Promise<Analysi
     }
   }
 
+  // سقف الوقف الأقصى لحماية الصفقات بالرافعة المالية (Max SL Cap Protection)
+  // يمنع تجاوز الوقف نسبة 2.2% للعملات البديلة (أو 1.5% للبيتكوين) لتفادي الخسائر الكبيرة مثل 19% عند رافعة 5x
+  if (settings.enableMaxSlCap !== false) {
+    const maxAllowedDistPct = settings.maxSlDistancePercent && settings.maxSlDistancePercent > 0
+      ? settings.maxSlDistancePercent
+      : (isBtc ? 1.5 : 2.2);
+    const maxRiskDistanceAllowed = effectiveEntryPrice * (maxAllowedDistPct / 100);
+    const currentSlDist = Math.abs(effectiveEntryPrice - slCalculated);
+    if (currentSlDist > maxRiskDistanceAllowed) {
+      if (targetDir === 'BUY') {
+        slCalculated = effectiveEntryPrice - maxRiskDistanceAllowed;
+      } else {
+        slCalculated = effectiveEntryPrice + maxRiskDistanceAllowed;
+      }
+    }
+  }
+
   const riskDist = Math.max(effectiveEntryPrice * 0.002, Math.abs(effectiveEntryPrice - slCalculated));
 
   // ----------------------------------------------------
@@ -2257,10 +2304,10 @@ export async function analyzeIntradayMarketData(symbol: string): Promise<Analysi
   }
 
   const btcGuard = await checkBtcCorrelationGuard();
-  if (settings.enableBtcGuard && symbol.toUpperCase() !== 'BTCUSDT' && decision === 'BUY' && !btcGuard.isBtcSafe) {
+  if (settings.enableBtcGuard && !symbol.toUpperCase().includes('BTC') && decision === 'BUY' && !btcGuard.isBtcSafe) {
     decision = 'NO_TRADE';
-    rejected_at_step = 'BTC Correlation Guard (فلتر اتجاه البتكوين)';
-    reason = `⚠️ تم حجب الشراء بواسطة فلتر BTC Guard! البتكوين يمر بهبوط حاد (${btcGuard.btc24hChange.toFixed(2)}%).`;
+    rejected_at_step = 'BTC Correlation Guard (فلتر اتجاه وزخم البتكوين)';
+    reason = btcGuard.message;
   }
 
   const spreadGuard = await checkSpreadGuard(symbol);
@@ -2313,6 +2360,7 @@ export async function analyzeIntradayMarketData(symbol: string): Promise<Analysi
       atrValue: Number(atr_5m.toFixed(decimalPlaces)),
       riskDistance: Number(riskDist.toFixed(decimalPlaces)),
       breakEvenPrice: Number((targetDir === 'BUY' ? effectiveEntryPrice * 1.0005 : effectiveEntryPrice * 0.9995).toFixed(decimalPlaces)),
+      beTriggerPrice: Number(tp1Calculated.toFixed(decimalPlaces)),
       trailingStopInitial: Number((targetDir === 'BUY' ? effectiveEntryPrice - atr_5m * 1.5 : effectiveEntryPrice + atr_5m * 1.5).toFixed(decimalPlaces)),
       target50PercentPrice: Number((targetDir === 'BUY' ? effectiveEntryPrice + (tp4Calculated - effectiveEntryPrice) * 0.5 : effectiveEntryPrice - (effectiveEntryPrice - tp4Calculated) * 0.5).toFixed(decimalPlaces)),
       trigger1_5AtrPrice: Number((targetDir === 'BUY' ? effectiveEntryPrice + (1.5 * atr_15m) : effectiveEntryPrice - (1.5 * atr_15m)).toFixed(decimalPlaces)),

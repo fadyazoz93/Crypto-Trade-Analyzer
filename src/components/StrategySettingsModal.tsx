@@ -751,6 +751,67 @@ export const StrategySettingsModal: React.FC<StrategySettingsModalProps> = ({ is
                 توسيع وقف الخسارة للعملات البديلة إلى 2.4x ATR مع هامش 1.2% لحمايتها من ذيول ضرب الوقف السريعة، مع تصغير حجم العقد آلياً لتثبيت المخاطرة عند 1% بالضبط.
               </p>
             </div>
+
+            {/* 14. Max SL Cap for Leveraged Safety */}
+            <div className="p-3 bg-slate-900 rounded-xl border border-rose-900/40 space-y-2">
+              <label className="flex items-center justify-between cursor-pointer">
+                <span className="font-bold text-rose-300">🛡️ سقف الوقف الأقصى لحماية الرافعة (Max SL Cap)</span>
+                <input
+                  type="checkbox"
+                  checked={settings.enableMaxSlCap ?? true}
+                  onChange={(e) => setSettings({ ...settings, enableMaxSlCap: e.target.checked })}
+                  className="rounded border-slate-700 text-rose-500 focus:ring-rose-500 w-4 h-4 cursor-pointer"
+                />
+              </label>
+              <div className="flex items-center gap-2 pt-1">
+                <span className="text-[11px] text-slate-300">أقصى مسافة وقف مسموحة:</span>
+                <input
+                  type="number"
+                  step="0.1"
+                  min="1.0"
+                  max="4.0"
+                  value={settings.maxSlDistancePercent ?? 2.2}
+                  onChange={(e) => setSettings({ ...settings, maxSlDistancePercent: Math.max(1.0, parseFloat(e.target.value) || 2.2) })}
+                  className="w-20 px-2 py-1 bg-slate-800 border border-slate-700 rounded text-center text-xs font-mono font-bold text-rose-400 focus:border-rose-500 outline-none"
+                />
+                <span className="text-[11px] text-slate-400">% من سعر الدخول</span>
+              </div>
+              <p className="text-[10px] text-slate-400 leading-relaxed">
+                يحدد سقفاً صارماً لمسافة الوقف (2.2% كحد أقصى)، مما يضمن عدم تجاوز الخسارة حاجز 11% بالرافعة 5x ويمنع الخسائر الحادة مثل AVAX نهائياً.
+              </p>
+            </div>
+
+            {/* 15. Lock Profit Rule (+0.5R at 50% TP) */}
+            <div className="p-3 bg-slate-900 rounded-xl border border-cyan-900/40 space-y-2">
+              <label className="flex items-center justify-between cursor-pointer">
+                <span className="font-bold text-cyan-300">💰 قاعدة حجز الأرباح المضمونة (+0.5R عند 50% من الهدف)</span>
+                <input
+                  type="checkbox"
+                  checked={settings.enableEarlyBreakevenAlert ?? true}
+                  onChange={(e) => setSettings({ ...settings, enableEarlyBreakevenAlert: e.target.checked })}
+                  className="rounded border-slate-700 text-cyan-500 focus:ring-cyan-500 w-4 h-4 cursor-pointer"
+                />
+              </label>
+              <p className="text-[10px] text-slate-400 leading-relaxed">
+                تضمين مستوى حجز أرباح لحظي في إشارات التليجرام والشارت: بمجرد وصول السعر لـ 50% من مشوار الهدف، يُرفع الوقف فوراً إلى مستوى ربح +0.5R لضمان الخروج بمكسب مؤكد حتى لو انعكس السوق.
+              </p>
+            </div>
+
+            {/* 16. BTC 15M Intraday Dump Guard */}
+            <div className="p-3 bg-slate-900 rounded-xl border border-amber-900/40 space-y-2">
+              <label className="flex items-center justify-between cursor-pointer">
+                <span className="font-bold text-amber-300">⚡ صمام أمان البتكوين اللحظي (BTC 15M Dump Guard)</span>
+                <input
+                  type="checkbox"
+                  checked={settings.enableBtc15mIntradayGuard ?? true}
+                  onChange={(e) => setSettings({ ...settings, enableBtc15mIntradayGuard: e.target.checked })}
+                  className="rounded border-slate-700 text-amber-500 focus:ring-amber-500 w-4 h-4 cursor-pointer"
+                />
+              </label>
+              <p className="text-[10px] text-slate-400 leading-relaxed">
+                مراقبة هبوط شمعة 15M اللحظية للبيتكوين؛ إذا هبطت بأكثر من 0.85%، يتم فوراً تجميد شراء العملات البديلة لحين استقرار الشمعة وتفادي السقوط المفاجئ.
+              </p>
+            </div>
           </div>
         </div>
 

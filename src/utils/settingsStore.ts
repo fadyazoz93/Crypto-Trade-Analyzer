@@ -119,12 +119,16 @@ export interface StrategySettings {
   // 12. Trade Signal Notification Cooldown (Anti-Spam Filter)
   signalCooldownMinutes: number; // default: 30 minutes cooldown between duplicate alerts for same symbol
 
-  // 13. Advanced Precision Guards (Anti-FOMO, Altcoin Buffer, Rejection Wick, Session Liquidity)
+  // 13. Advanced Precision Guards (Anti-FOMO, Altcoin Buffer, Rejection Wick, Session Liquidity, Max SL Cap, Early BE)
   enableAntiFomoGuard: boolean; // default: true (prevents chasing extended pumps/dumps)
   antiFomoMaxExtensionPercent: number; // default: 1.2% for BTC, 1.8% for Altcoins
   enableAltcoinSessionGuard: boolean; // default: true (blocks altcoins in 22:00-06:00 UTC low-liquidity hours)
   enableAdverseWickGuard: boolean; // default: true (blocks buying under shooting stars or selling over hammers)
   enableAdaptiveAltcoinBuffer: boolean; // default: true (expands SL on volatile altcoins with auto position downscaling)
+  enableMaxSlCap: boolean; // default: true (caps SL distance to prevent catastrophic leveraged losses)
+  maxSlDistancePercent: number; // default: 2.2% (at 5x leverage = max 11% loss on margin)
+  enableEarlyBreakevenAlert: boolean; // default: true (advises moving SL to entry at 0.5R)
+  enableBtc15mIntradayGuard: boolean; // default: true (checks BTC 15M sharp drop)
 }
 
 const SETTINGS_KEY = 'crypto_analyzer_strategy_settings_v41';
@@ -252,6 +256,10 @@ export const DEFAULT_SETTINGS: StrategySettings = {
   enableAltcoinSessionGuard: true,
   enableAdverseWickGuard: true,
   enableAdaptiveAltcoinBuffer: true,
+  enableMaxSlCap: true,
+  maxSlDistancePercent: 2.2,
+  enableEarlyBreakevenAlert: true,
+  enableBtc15mIntradayGuard: true,
 };
 
 let serverSettings: StrategySettings = {
@@ -262,6 +270,10 @@ let serverSettings: StrategySettings = {
   enableAltcoinSessionGuard: true,
   enableAdverseWickGuard: true,
   enableAdaptiveAltcoinBuffer: true,
+  enableMaxSlCap: true,
+  maxSlDistancePercent: 2.2,
+  enableEarlyBreakevenAlert: true,
+  enableBtc15mIntradayGuard: true,
 };
 
 export function setServerStrategySettings(updates: Partial<StrategySettings>): void {
@@ -305,6 +317,10 @@ export function getStrategySettings(): StrategySettings {
       enableAltcoinSessionGuard: parsed.enableAltcoinSessionGuard !== undefined ? Boolean(parsed.enableAltcoinSessionGuard) : true,
       enableAdverseWickGuard: parsed.enableAdverseWickGuard !== undefined ? Boolean(parsed.enableAdverseWickGuard) : true,
       enableAdaptiveAltcoinBuffer: parsed.enableAdaptiveAltcoinBuffer !== undefined ? Boolean(parsed.enableAdaptiveAltcoinBuffer) : true,
+      enableMaxSlCap: parsed.enableMaxSlCap !== undefined ? Boolean(parsed.enableMaxSlCap) : true,
+      maxSlDistancePercent: parsed.maxSlDistancePercent !== undefined && Number(parsed.maxSlDistancePercent) > 0 ? Number(parsed.maxSlDistancePercent) : 2.2,
+      enableEarlyBreakevenAlert: parsed.enableEarlyBreakevenAlert !== undefined ? Boolean(parsed.enableEarlyBreakevenAlert) : true,
+      enableBtc15mIntradayGuard: parsed.enableBtc15mIntradayGuard !== undefined ? Boolean(parsed.enableBtc15mIntradayGuard) : true,
     };
     return settings;
   } catch (err) {

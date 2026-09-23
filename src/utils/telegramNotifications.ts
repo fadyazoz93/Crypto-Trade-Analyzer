@@ -13,6 +13,9 @@ export interface TelegramSignalData {
   entryType?: 'LIMIT' | 'MARKET' | 'STOP' | 'STOP_LIMIT';
   entryDistancePercent?: number;
   stopLoss?: number;
+  breakevenTriggerPrice?: number;
+  target50PercentPrice?: number;
+  lockProfitPrice?: number;
   takeProfit?: number;
   takeProfit1?: number;
   takeProfit2?: number;
