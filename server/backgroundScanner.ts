@@ -5,8 +5,8 @@
  * and sends instant alerts to Telegram 24/7 without needing an open browser.
  */
 
-import { analyzeMarketData, POPULAR_SYMBOLS } from '../src/utils/technicalAnalysis';
-import { sendTelegramSignalDirect, sendTelegramTrailingStopUpdate } from '../api/telegram';
+import { analyzeMarketData, POPULAR_SYMBOLS, checkBtcCorrelationGuard } from '../src/utils/technicalAnalysis';
+import { sendTelegramSignalDirect, sendTelegramTrailingStopUpdate, sendTelegramEmergencyExitAlert } from '../api/telegram';
 import { recordSignalDirect } from '../api/turso';
 import { TradingMode } from '../src/types';
 import { setServerStrategySettings } from '../src/utils/settingsStore';
@@ -36,6 +36,7 @@ export interface TrackedActiveTrade {
   lowestPrice: number;
   stage: 'INITIAL' | 'BREAKEVEN' | 'LOCK_PROFIT_0_5R' | 'TRAILING_LOCK_1' | 'TRAILING_LOCK_2' | 'TRAILING_50_LOCK' | 'CLOSED';
   lastTrailingNotifyAt?: number;
+  emergencyExitAlertSent?: boolean;
   createdAt: number;
 }
 
@@ -426,6 +427,29 @@ class BackgroundScannerDaemon {
           console.log(`[Trailing Stop] ${symbol} Hit Final TP4 ($${trade.tp4}). Closed tracking with full profit!`);
           this.activeTrades.delete(symbol);
           continue;
+        }
+
+        // تنبيه الطوارئ المبكر: فحص هبوط البيتكوين اللحظي لصفقات الشراء المفتوحة على العملات البديلة
+        if (isBuy && !symbol.toUpperCase().includes('BTC') && !trade.emergencyExitAlertSent && (trade.stage === 'INITIAL' || trade.stage === 'BREAKEVEN')) {
+          try {
+            const btcGuard = await checkBtcCorrelationGuard();
+            if (!btcGuard.isBtcSafe && btcGuard.btcTrend === 'BEARISH_DUMP') {
+              console.log(`[Emergency Alert] 🚨 ${symbol}: Detected sudden BTC dump while Long position is active. Dispatching emergency warning.`);
+              trade.emergencyExitAlertSent = true;
+              await sendTelegramEmergencyExitAlert({
+                symbol,
+                decision: trade.decision,
+                currentPrice: curPrice,
+                entryPrice: entry,
+                currentStopLoss: trade.currentStopLoss,
+                btcPrice: btcGuard.btcPrice,
+                btcDropPercent: btcGuard.btc24hChange,
+                reason: btcGuard.message,
+              });
+            }
+          } catch {
+            // Non-fatal failover
+          }
         }
 
         // حماية صارمة: منع إرسال أكثر من إشعار تعديل وقف لنفس العملة في نفس الوقت (نافذة تبريد 3 دقائق)

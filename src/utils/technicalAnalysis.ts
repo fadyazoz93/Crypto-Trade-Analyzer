@@ -17,7 +17,7 @@ export async function checkBtcCorrelationGuard(): Promise<BtcGuardStatus> {
       const btc24hChange = btcTicker.priceChangePercent;
 
       // 1. فحص الهبوط اليومي الحاد للبيتكوين (Daily Dump)
-      if (btc24hChange <= -3.0) {
+      if (btc24hChange <= -2.5) {
         return {
           isBtcSafe: false,
           btcTrend: 'BEARISH_DUMP',
@@ -27,23 +27,43 @@ export async function checkBtcCorrelationGuard(): Promise<BtcGuardStatus> {
         };
       }
 
-      // 2. فحص الهبوط اللحظي الحاد على فريم 15 دقيقة (Intraday 15M BTC Flash Drop)
+      // 2. فحص الهبوط اللحظي الحاد المباشر (Real-Time Live BTC Flash Drop Guard)
+      // يفحص كلاً من الشمعة الحية الحالية (Active Candle) والشمعة المغلقة السابقة
       if (settings.enableBtc15mIntradayGuard !== false) {
         try {
           const btc15mData = await fetchOkxCandles('BTC-USDT', '15m', 6);
-          if (btc15mData && btc15mData.candles && btc15mData.candles.length >= 3) {
-            // الشمعة المغلقة الأخيرة
-            const lastClosed = btc15mData.candles[btc15mData.candles.length - 2];
-            if (lastClosed && lastClosed.open > 0) {
-              const candle15mChange = ((lastClosed.close - lastClosed.open) / lastClosed.open) * 100;
-              // إذا هبطت شمعة الـ 15 دقيقة بأكثر من 0.85%
-              if (candle15mChange <= -0.85) {
+          if (btc15mData && btc15mData.candles && btc15mData.candles.length >= 2) {
+            const currentLiveCandle = btc15mData.candles[btc15mData.candles.length - 1];
+            const prevClosedCandle = btc15mData.candles[btc15mData.candles.length - 2];
+
+            // أ) فحص الشمعة اللحظية النشطة الحالية (Live Candle Drop)
+            if (currentLiveCandle && currentLiveCandle.open > 0) {
+              const liveDropFromOpen = ((currentLiveCandle.close - currentLiveCandle.open) / currentLiveCandle.open) * 100;
+              const liveDropFromHigh = ((currentLiveCandle.close - currentLiveCandle.high) / currentLiveCandle.high) * 100;
+              const dollarDrop = Math.abs(currentLiveCandle.high - currentLiveCandle.close);
+
+              // إذا هبطت الشمعة الحية بأكثر من 0.35% أو أكثر من 300$
+              if (liveDropFromOpen <= -0.35 || liveDropFromHigh <= -0.45 || dollarDrop >= 350) {
                 return {
                   isBtcSafe: false,
                   btcTrend: 'BEARISH_DUMP',
                   btcPrice,
                   btc24hChange,
-                  message: `⚠️ تحذير BTC 15M Intraday Guard: البتكوين يتعرض لهبوط حاد لحظي على فريم 15M (${candle15mChange.toFixed(2)}%)! تم حظر شراء العملات البديلة مؤقتاً لحين استقرار الشمعة.`,
+                  message: `⚠️ تحذير BTC Live Flash Drop Guard: البيتكوين يشهد هبوطاً لحظياً سريعاً (${liveDropFromOpen.toFixed(2)}% / -$${dollarDrop.toFixed(0)}) في الشمعة الحالية! تم تفعيل الحظر الوقائي لصفقات الشراء على العملات البديلة.`,
+                };
+              }
+            }
+
+            // ب) فحص الشمعة السابقة إذا أغلقت بهبوط خاطف (Previous Flash Drop)
+            if (prevClosedCandle && prevClosedCandle.open > 0) {
+              const prevDrop = ((prevClosedCandle.close - prevClosedCandle.open) / prevClosedCandle.open) * 100;
+              if (prevDrop <= -0.50) {
+                return {
+                  isBtcSafe: false,
+                  btcTrend: 'BEARISH_DUMP',
+                  btcPrice,
+                  btc24hChange,
+                  message: `⚠️ تحذير BTC Flash Drop Guard: البيتكوين أغلق شمعة 15M سابقة بهبوط حاد (${prevDrop.toFixed(2)}%)! حظر مؤقت لشراء العملات البديلة حتى تأكيد الارتداد.`,
                 };
               }
             }
@@ -1884,31 +1904,31 @@ export async function analyzeIntradayMarketData(symbol: string): Promise<Analysi
 
   // Strict Directional Safety Guard for Stop Loss (Anti-Stop-Hunt Buffer):
   const minSafeRiskDist = Math.max(
-    effectiveEntryPrice * (isAdaptiveAltcoin ? 0.018 : 0.008),
-    atr_15m * (isAdaptiveAltcoin ? 2.0 : 1.4)
+    effectiveEntryPrice * (isAdaptiveAltcoin ? 0.024 : 0.008),
+    atr_15m * (isAdaptiveAltcoin ? 2.4 : 1.4)
   );
   if (targetDir === 'BUY') {
     if (slCalculated >= effectiveEntryPrice - minSafeRiskDist) {
       slCalculated = effectiveEntryPrice - Math.max(
-        effectiveEntryPrice * (isAdaptiveAltcoin ? 0.020 : 0.010),
-        atr_15m * (isAdaptiveAltcoin ? 2.4 : 1.6)
+        effectiveEntryPrice * (isAdaptiveAltcoin ? 0.026 : 0.010),
+        atr_15m * (isAdaptiveAltcoin ? 2.8 : 1.6)
       );
     }
   } else {
     if (slCalculated <= effectiveEntryPrice + minSafeRiskDist) {
       slCalculated = effectiveEntryPrice + Math.max(
-        effectiveEntryPrice * (isAdaptiveAltcoin ? 0.020 : 0.010),
-        atr_15m * (isAdaptiveAltcoin ? 2.4 : 1.6)
+        effectiveEntryPrice * (isAdaptiveAltcoin ? 0.026 : 0.010),
+        atr_15m * (isAdaptiveAltcoin ? 2.8 : 1.6)
       );
     }
   }
 
   // سقف الوقف الأقصى لحماية الصفقات بالرافعة المالية (Max SL Cap Protection)
-  // يمنع تجاوز الوقف نسبة 2.2% للعملات البديلة (أو 1.5% للبيتكوين) لتفادي الخسائر الكبيرة مثل 19% عند رافعة 5x
+  // يمنع تجاوز الوقف نسبة 2.8% للعملات البديلة (أو 1.5% للبيتكوين) لتفادي الخسائر الكبيرة عند رافعة 5x
   if (settings.enableMaxSlCap !== false) {
     const maxAllowedDistPct = settings.maxSlDistancePercent && settings.maxSlDistancePercent > 0
       ? settings.maxSlDistancePercent
-      : (isBtc ? 1.5 : 2.2);
+      : (isBtc ? 1.5 : 2.8);
     const maxRiskDistanceAllowed = effectiveEntryPrice * (maxAllowedDistPct / 100);
     const currentSlDist = Math.abs(effectiveEntryPrice - slCalculated);
     if (currentSlDist > maxRiskDistanceAllowed) {

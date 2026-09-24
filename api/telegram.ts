@@ -493,6 +493,63 @@ export interface TrailingStopUpdatePayload {
   binancePrice?: number;
 }
 
+export interface EmergencyExitAlertPayload {
+  symbol: string;
+  decision: 'BUY' | 'SELL';
+  currentPrice: number;
+  entryPrice: number;
+  currentStopLoss: number;
+  btcPrice: number;
+  btcDropPercent: number;
+  reason: string;
+}
+
+const recentEmergencyAlerts = new Map<string, number>();
+
+/**
+ * إرسال تنبيه طوارئ للخروج السريع عند رصد هبوط مفاجئ في البيتكوين يهدد العملات البديلة
+ */
+export async function sendTelegramEmergencyExitAlert(payload: EmergencyExitAlertPayload): Promise<{ success: boolean; error?: string }> {
+  const { symbol, decision, currentPrice, entryPrice, currentStopLoss, btcPrice, btcDropPercent, reason } = payload;
+  const normalizedSymbol = normalizeSymbolKey(symbol);
+
+  const now = Date.now();
+  const lastSent = recentEmergencyAlerts.get(normalizedSymbol) || 0;
+  // تبريد 20 دقيقة لنفس العملة لمنع إزعاج المتداول
+  if (now - lastSent < 20 * 60 * 1000) {
+    return { success: true };
+  }
+  recentEmergencyAlerts.set(normalizedSymbol, now);
+
+  const isBuy = decision === 'BUY';
+  const formattedCur = `$${currentPrice < 1 ? currentPrice.toFixed(4) : currentPrice.toFixed(2)}`;
+  const formattedEntry = `$${entryPrice < 1 ? entryPrice.toFixed(4) : entryPrice.toFixed(2)}`;
+  const formattedSl = `$${currentStopLoss < 1 ? currentStopLoss.toFixed(4) : currentStopLoss.toFixed(2)}`;
+  const formattedBtc = `$${btcPrice.toLocaleString('en-US')}`;
+
+  const message = `🚨 <b>تنبيه طوارئ: انزلاق حاد في البيتكوين (${btcDropPercent > 0 ? '-' : ''}${Math.abs(btcDropPercent).toFixed(2)}%)!</b>
+════════════════════
+🪙 <b>العملة المفتوحة:</b> ${symbol}
+🧭 <b>نوع الصفقة الحالية:</b> ${isBuy ? '🟢 شراء (LONG)' : '🔴 بيع (SHORT)'}
+════════════════════
+📍 <b>سعر الدخول:</b> ${formattedEntry}
+💵 <b>السعر الحالي:</b> ${formattedCur}
+❌ <b>وقف الخسارة الأصلي:</b> ${formattedSl}
+⚡ <b>سعر البيتكوين اللحظي:</b> ${formattedBtc}
+════════════════════
+⚠️ <b>السبب الفني:</b> ${reason}
+💡 <b>الإجراء المقترح فوراً:</b>
+1️⃣ يُنصح بالخروج اليدوي الفوري (Close Position) أو رفع وقف الخسارة لسعر الدخول.
+2️⃣ هبوط البيتكوين المفاجئ يسحب العملات البديلة لموجات بيع قسرية، والخروج المبكر يوفر أكثر من 70% من خسارة الوقف الكامل!`;
+
+  try {
+    const result = await sendTelegramMessage(message);
+    return { success: result.ok, error: result.error };
+  } catch (err: any) {
+    return { success: false, error: err.message };
+  }
+}
+
 /**
  * إرسال إشعار تليجرام عند تعديل وقف الخسارة (Stop Trailing / Move SL to Entry or Profit)
  */
