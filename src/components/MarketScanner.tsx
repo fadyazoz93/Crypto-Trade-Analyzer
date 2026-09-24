@@ -233,6 +233,7 @@ ${matrix ? `درجة التوافق: ${matrix.totalScore}/100 (${matrix.grade})`
               entryPrice: record.entryPrice || livePrice,
               oldStopLoss: record.stopLoss || 0,
               newStopLoss: record.entryPrice || 0,
+              tp1Price: record.target50PercentPrice || record.takeProfit1 || livePrice,
               stage: 'BREAKEVEN',
               targetHitName: 'وصول السعر إلى 50% من مشوار الهدف',
             }).catch(() => {});

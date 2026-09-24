@@ -190,6 +190,7 @@ export interface DirectSignalPayload {
   takeProfit2?: number;
   takeProfit3?: number;
   takeProfit4?: number;
+  target50PercentPrice?: number;
   riskRewardRatio?: string;
   sopScore?: number;
   reason?: string;
@@ -247,6 +248,7 @@ export async function sendTelegramSignalDirect(payload: DirectSignalPayload): Pr
     takeProfit2,
     takeProfit3,
     takeProfit4,
+    target50PercentPrice,
     riskRewardRatio,
     sopScore,
     reason,
@@ -392,9 +394,28 @@ export async function sendTelegramSignalDirect(payload: DirectSignalPayload): Pr
     const formattedEntry = formatNumberVal(entryPrice ?? price);
     const formattedSl = formatNumberVal(stopLoss);
 
-    // اختيار الهدف الأخير وليس المجزأ (الهدف النهائي 2.0R أو الهدف الموحد الكامل)
-    const finalTp = takeProfit4 || takeProfit || (payload as any).take_profit_4 || (payload as any).take_profit || takeProfit2 || takeProfit1;
-    const formattedFinalTp = formatNumberVal(finalTp);
+    // اختيار الهدف النهائي (TP2 - الهدف النهائي من الربح)
+    const finalTp = takeProfit4 || takeProfit || (payload as any).take_profit_4 || (payload as any).take_profit || takeProfit2 || 0;
+    const finalTpNum = Number(finalTp);
+
+    // حساب أو تحديد الهدف الأول TP1 (50% من مشوار الأرباح لسحبها كاش بإغلاق 50% من العقد)
+    let tp1Num = Number(
+      target50PercentPrice ||
+      payload.target50PercentPrice ||
+      (payload as any).target_50_percent_price ||
+      0
+    );
+    if ((!tp1Num || tp1Num <= 0) && numEntry > 0 && finalTpNum > 0) {
+      tp1Num = isBuy
+        ? numEntry + (finalTpNum - numEntry) * 0.5
+        : numEntry - (numEntry - finalTpNum) * 0.5;
+    }
+    if ((!tp1Num || tp1Num <= 0) && takeProfit1) {
+      tp1Num = Number(takeProfit1);
+    }
+
+    const formattedTp1 = formatNumberVal(tp1Num);
+    const formattedFinalTp = formatNumberVal(finalTpNum > 0 ? finalTpNum : (takeProfit1 || price));
 
     // التحقق من نوع الأمر والمسافة بين السعر الحالي وسعر الدخول
     const calcGapPct = numPrice > 0 ? (((numPrice - numEntry) / numPrice) * 100) : 0;
@@ -433,7 +454,8 @@ ${executionTypeLine}
 🎯 سعر الدخول المقترح: ${formattedEntry}
 💵 السعر اللحظي (OKX): ${formattedPrice}
 🔶 سعر Binance الموازي: ${parallelBinanceVal}
-🎯 الهدف الموحد (TP): ${formattedFinalTp}
+🎯 الهدف الأول (TP1): ${formattedTp1} (50% من الربح لسحبها كاش بإغلاق 50% من العقد)
+🎯 الهدف الثاني (TP2): ${formattedFinalTp} (الهدف النهائي من الربح)
 🛑 وقف الخسارة (SL): ${formattedSl}${formattedSlDist}
 🛡️ إدارة المخاطر: حدد حجم العقد بحيث لا تتجاوز الخسارة 1% من رأس المال`;
 
@@ -464,6 +486,7 @@ export interface TrailingStopUpdatePayload {
   entryPrice: number;
   oldStopLoss: number;
   newStopLoss: number;
+  tp1Price?: number;
   targetHitName?: string; // e.g. "وصول السعر إلى 50% من مشوار الهدف" أو "1.5 ATR"
   stage: 'BREAKEVEN' | 'LOCK_PROFIT_0_5R' | 'TRAILING_LOCK' | 'TRAILING_50_LOCK';
   reason?: string;
@@ -481,6 +504,7 @@ export async function sendTelegramTrailingStopUpdate(payload: TrailingStopUpdate
     entryPrice,
     oldStopLoss,
     newStopLoss,
+    tp1Price,
     targetHitName = 'تحقيق هدف جزئي',
     stage,
     reason,
@@ -551,6 +575,8 @@ export async function sendTelegramTrailingStopUpdate(payload: TrailingStopUpdate
       actualNewStopLoss = entryPrice;
     }
 
+    const tp1Value = tp1Price && tp1Price > 0 ? tp1Price : currentPrice;
+    const formattedTp1 = formatNumberVal(tp1Value);
     const formattedCurPrice = formatNumberVal(currentPrice);
     const formattedEntry = formatNumberVal(entryPrice);
     const formattedOldSl = formatNumberVal(oldStopLoss);
@@ -577,7 +603,8 @@ export async function sendTelegramTrailingStopUpdate(payload: TrailingStopUpdate
 🔶 <b>سعر Binance الموازي:</b> ${parallelBinanceVal}
 ════════════════════
 🎯 <b>المستوى المحقق:</b> وصول السعر إلى 50% من مشوار الهدف
-💰 <b>جني الأرباح الجزئي:</b> إغلاق 50% من العقود كاش الآن
+🎯 <b>سعر الهدف الأول (TP1):</b> <b>${formattedTp1}</b>
+💰 <b>جني الأرباح الجزئي:</b> إغلاق 50% من العقود كاش الآن عند سعر TP1 (${formattedTp1})
 ❌ <b>وقف الخسارة السابق (Old SL):</b> ${formattedOldSl}
 🚨 <b>وقف الخسارة الجديد للتعديل فوراً (New SL):</b> <b>${formattedNewSl} (سعر الدخول)</b>
 🛡️ <b>إدارة المخاطر:</b> تم تأمين ربح نقدي وحماية ما تبقى من الصفقة مع ترك مساحة تنفس كاملة للتصحيح نحو الهدف النهائي.`;
@@ -591,9 +618,11 @@ export async function sendTelegramTrailingStopUpdate(payload: TrailingStopUpdate
 💵 <b>السعر الحالي (OKX):</b> ${formattedCurPrice}
 🔶 <b>سعر Binance الموازي:</b> ${parallelBinanceVal}
 ════════════════════
+🎯 <b>المستوى المحقق:</b> ${targetHitName || 'وصول السعر إلى 1.5R من الأرباح'}
 ❌ <b>وقف الخسارة السابق (Old SL):</b> ${formattedOldSl}
-🚨 <b>وقف الخسارة الجديد للتعديل فوراً (New SL):</b> <b>${formattedNewSl}</b>
-⚙️ <b>الإجراء المطلوب:</b> ${isBuy ? 'رفع الوقف لحجز الأرباح ⬆️' : 'خفض الوقف لحجز الأرباح ⬇️'}`;
+🚨 <b>وقف الخسارة الجديد للتعديل فوراً (New SL):</b> <b>${formattedNewSl} (+1.0R ربح مؤكد)</b>
+⚙️ <b>الإجراء المطلوب:</b> ${isBuy ? 'رفع الوقف لحجز أرباح 1.0R ⬆️' : 'خفض الوقف لحجز أرباح 1.0R ⬇️'}
+🛡️ <b>إدارة المخاطر:</b> تم حجز أرباح 1.0R كاملة وتأمينها في المحفظة حتى لو انعكس السعر.`;
     }
 
     const result = await sendTelegramMessage(message);

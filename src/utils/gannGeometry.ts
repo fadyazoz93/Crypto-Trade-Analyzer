@@ -672,22 +672,23 @@ export function calculateStructuralSL(
   distance: number;
   description: string;
 } {
-  const minSafeRiskDist = Math.max(entryPrice * 0.005, symbolATR > 0 ? symbolATR * 1.0 : entryPrice * 0.005);
+  // للعملات المشفرة: ضمان مسافة أمان لا تقل عن 0.8% أو 1.4x ATR لمنع ضرب الوقف بتذبذبات الذيول العشوائية (Noise / Wick Hunts)
+  const minSafeRiskDist = Math.max(entryPrice * 0.008, symbolATR > 0 ? symbolATR * 1.4 : entryPrice * 0.008);
   const effectiveFallback = Math.max(minSafeRiskDist, riskDistFallback);
-  const effectiveBufferMult = enableAntiStopHunt ? Math.max(1.0, atrBufferMult) : atrBufferMult;
-  const atrBufferDist = symbolATR > 0 ? (symbolATR * effectiveBufferMult) : (entryPrice * (enableAntiStopHunt ? 0.004 : 0.002));
+  const effectiveBufferMult = enableAntiStopHunt ? Math.max(1.5, atrBufferMult) : atrBufferMult;
+  const atrBufferDist = symbolATR > 0 ? (symbolATR * effectiveBufferMult) : (entryPrice * (enableAntiStopHunt ? 0.008 : 0.004));
 
   // 1. Wyckoff Extreme Structural SL with Anti-Stop-Hunt Buffer
   if (wyckoffExtremePrice > 0) {
     const huntBuffer = enableAntiStopHunt
-      ? Math.max(entryPrice * 0.0025, symbolATR > 0 ? symbolATR * 0.6 : entryPrice * 0.0025)
-      : (entryPrice * 0.0008);
+      ? Math.max(entryPrice * 0.004, symbolATR > 0 ? symbolATR * 1.0 : entryPrice * 0.004)
+      : (entryPrice * 0.0015);
     const wyckoffSL = isLong ? (wyckoffExtremePrice - huntBuffer) : (wyckoffExtremePrice + huntBuffer);
     // For Long: SL MUST be strictly below entryPrice. For Short: SL MUST be strictly above entryPrice.
-    const isDirectionValid = isLong ? (wyckoffSL < entryPrice - minSafeRiskDist * 0.4) : (wyckoffSL > entryPrice + minSafeRiskDist * 0.4);
+    const isDirectionValid = isLong ? (wyckoffSL < entryPrice - minSafeRiskDist * 0.6) : (wyckoffSL > entryPrice + minSafeRiskDist * 0.6);
     const dist = Math.abs(entryPrice - wyckoffSL);
     
-    if (isDirectionValid && dist >= (minSafeRiskDist * 0.4) && dist <= (effectiveFallback * 2.5)) {
+    if (isDirectionValid && dist >= (minSafeRiskDist * 0.6) && dist <= (effectiveFallback * 2.5)) {
       return {
         stopLoss: wyckoffSL,
         type: 'WYCKOFF_EXTREME',
@@ -700,10 +701,10 @@ export function calculateStructuralSL(
   // 2. Gann Swing Anchor Structural SL with Anti-Stop-Hunt Buffer
   if (anchorPrice && anchorPrice > 0) {
     const calculatedSL = isLong ? (anchorPrice - atrBufferDist) : (anchorPrice + atrBufferDist);
-    const isDirectionValid = isLong ? (calculatedSL < entryPrice - minSafeRiskDist * 0.4) : (calculatedSL > entryPrice + minSafeRiskDist * 0.4);
+    const isDirectionValid = isLong ? (calculatedSL < entryPrice - minSafeRiskDist * 0.6) : (calculatedSL > entryPrice + minSafeRiskDist * 0.6);
     const dist = Math.abs(entryPrice - calculatedSL);
     
-    if (isDirectionValid && dist >= (minSafeRiskDist * 0.5) && dist <= (effectiveFallback * 2.5)) {
+    if (isDirectionValid && dist >= (minSafeRiskDist * 0.6) && dist <= (effectiveFallback * 2.5)) {
       return {
         stopLoss: calculatedSL,
         type: 'GANN_SWING_ANCHOR',
@@ -719,7 +720,7 @@ export function calculateStructuralSL(
     stopLoss: fallbackSL,
     type: 'ATR_FALLBACK',
     distance: effectiveFallback,
-    description: `وقف خسارة ديناميكي قياسي (ATR Fallback) محصّن بمقدار ${((effectiveFallback / entryPrice) * 100).toFixed(2)}%`,
+    description: `وقف خسارة ديناميكي قياسي (ATR Fallback) محصّن ضد سحب السيولة بمقدار ${((effectiveFallback / entryPrice) * 100).toFixed(2)}%`,
   };
 }
 

@@ -191,7 +191,21 @@ export function checkTradingTimeGuard(symbol?: string, now = new Date()): TimeGu
     activeSessionsList,
   };
 
-  // فلتر سيولة الجلسات للعملات البديلة (Altcoin Session Liquidity Guard)
+  // 1. فلتر تصفية الشمعة اليومية ومعدلات التمويل (Daily Rollover Liquidity Sweep Guard: 23:45 - 00:15 UTC)
+  // فترة تصفية العقود اليومية وإعادة ضبط معدلات التمويل (Funding Rates) واصطياد السيولة بالذيول الحادة على جميع العملات بما فيها BTC
+  const isDailyRolloverSweepWindow = (utcHour === 23 && utcMinute >= 45) || (utcHour === 0 && utcMinute <= 15);
+  if (isDailyRolloverSweepWindow) {
+    return {
+      isSafe: false,
+      windowName: 'فترة تصفية الشمعة اليومية ومعدلات التمويل (23:45 - 00:15 UTC)',
+      reason: `الوقت الحالي (${utcTimeStr}) يقع ضمن نافذة إغلاق وافتتاح اليوم الجديد وتصفية التمويل. تشهد هذه الفترة ذيول سحب سيولة عنيفة على المنصات.`,
+      utcTime: utcTimeStr,
+      nextSafeTime: '00:15 UTC (استقرار سيولة اليوم الجديد)',
+      sessionInfo,
+    };
+  }
+
+  // 2. فلتر سيولة الجلسات للعملات البديلة (Altcoin Session Liquidity Guard)
   // يمنع فتح صفقات جديدة على العملات البديلة في ساعات ركود السيولة (22:00 - 06:00 UTC) لتفادي الكسر الكاذب وتصفيات السيولة السريعة
   const isBtcSymbol = symbol ? symbol.toUpperCase().includes('BTC') : false;
   if (symbol && !isBtcSymbol && settings.enableAltcoinSessionGuard !== false) {
@@ -1868,23 +1882,23 @@ export async function analyzeIntradayMarketData(symbol: string): Promise<Analysi
 
   let slCalculated = structuralSL.stopLoss;
 
-  // Strict Directional Safety Guard for Stop Loss:
+  // Strict Directional Safety Guard for Stop Loss (Anti-Stop-Hunt Buffer):
   const minSafeRiskDist = Math.max(
-    effectiveEntryPrice * (isAdaptiveAltcoin ? 0.010 : 0.004),
-    atr_15m * (isAdaptiveAltcoin ? 1.5 : 0.8)
+    effectiveEntryPrice * (isAdaptiveAltcoin ? 0.018 : 0.008),
+    atr_15m * (isAdaptiveAltcoin ? 2.0 : 1.4)
   );
   if (targetDir === 'BUY') {
     if (slCalculated >= effectiveEntryPrice - minSafeRiskDist) {
       slCalculated = effectiveEntryPrice - Math.max(
-        effectiveEntryPrice * (isAdaptiveAltcoin ? 0.015 : 0.006),
-        atr_15m * (isAdaptiveAltcoin ? 2.2 : 1.5)
+        effectiveEntryPrice * (isAdaptiveAltcoin ? 0.020 : 0.010),
+        atr_15m * (isAdaptiveAltcoin ? 2.4 : 1.6)
       );
     }
   } else {
     if (slCalculated <= effectiveEntryPrice + minSafeRiskDist) {
       slCalculated = effectiveEntryPrice + Math.max(
-        effectiveEntryPrice * (isAdaptiveAltcoin ? 0.015 : 0.006),
-        atr_15m * (isAdaptiveAltcoin ? 2.2 : 1.5)
+        effectiveEntryPrice * (isAdaptiveAltcoin ? 0.020 : 0.010),
+        atr_15m * (isAdaptiveAltcoin ? 2.4 : 1.6)
       );
     }
   }
@@ -2292,6 +2306,51 @@ export async function analyzeIntradayMarketData(symbol: string): Promise<Analysi
         decision = 'NO_TRADE';
         rejected_at_step = 'Adverse Rejection Wick Guard (ذيل شرائي ارتدادي على 15M)';
         reason = `⚠️ تم حظر البيع بواسطة فلتر الشموع الرافضة: الشمعة المكتملة السابقة على 15M أغلقت بذيل سفلي طويل (${lowerWickRatio.toFixed(1)}% من المدى - نموذج مطرقة شرائية Hammer)، مما يؤكد وجود قوى شرائية ارتدادية تمنع فتح صفقات هبوط.`;
+      }
+    }
+  }
+
+  // 5. درع سحب السيولة والفخاخ السعرية (Liquidity Sweep Trap & Wick Hunt Guard)
+  // يمنع إطلاق الإشارات إذا كان كسر القمة/القاع بذيل شمعة فقط دون إغلاق كامل بالجسم (Wick Only)،
+  // أو إذا كان السعر قد سحب سيولة قمة/قاع الأمس ثم فشل في الثبات مما ينذر بانعكاس فوري
+  if (data15m.candles.length >= 2 && (decision === 'BUY' || decision === 'SELL')) {
+    const prevCandle15m = data15m.candles[data15m.candles.length - 2];
+    const lastCandle15m = data15m.candles[data15m.candles.length - 1];
+
+    // أ) التحقق من كسر بنية السوق بالجسم (Body Close) وليس بذيل فقط (Wick Only)
+    const mssConfirmed = targetDir === 'BUY'
+      ? lastCandle15m.close > prevCandle15m.high
+      : (targetDir === 'SELL' ? lastCandle15m.close < prevCandle15m.low : false);
+    
+    const isWickOnlyBreakout = !mssConfirmed && (
+      (targetDir === 'BUY' && lastCandle15m.high > prevCandle15m.high) ||
+      (targetDir === 'SELL' && lastCandle15m.low < prevCandle15m.low)
+    );
+
+    if (isWickOnlyBreakout) {
+      decision = 'NO_TRADE';
+      rejected_at_step = 'Liquidity Sweep Wick Trap Guard (كسر وهمي بذيل الشمعة فقط)';
+      reason = `⚠️ تم حجب الدخول بواسطة درع سحب السيولة (Wick Trap): كسر القمة/القاع على إطار 15M تم بذيل شمعة فقط دون إغلاق كامل بالجسم. تجنب الدخول لتفادي الفخاخ السعرية والانعكاس المفاجئ.`;
+    }
+
+    // ب) سحب سيولة قمم/قيعان الأمس مع فشل الثبات (PDH / PDL Sweep & Rejection)
+    if (decision !== 'NO_TRADE') {
+      const isPdhSweepReject = dailyMacroBias.prevDailyHigh > 0 &&
+        lastCandle15m.high >= dailyMacroBias.prevDailyHigh &&
+        lastCandle15m.close < dailyMacroBias.prevDailyHigh;
+      
+      const isPdlSweepReject = dailyMacroBias.prevDailyLow > 0 &&
+        lastCandle15m.low <= dailyMacroBias.prevDailyLow &&
+        lastCandle15m.close > dailyMacroBias.prevDailyLow;
+
+      if (decision === 'BUY' && isPdhSweepReject) {
+        decision = 'NO_TRADE';
+        rejected_at_step = 'PDH Liquidity Sweep Trap (سحب سيولة قمة الأمس)';
+        reason = `⚠️ تم حظر الشراء بواسطة درع سحب السيولة: تم رصد سحب سيولة فوق قمة الأمس (PDH: $${dailyMacroBias.prevDailyHigh.toFixed(price < 1 ? 4 : 2)}) وفشل الثبات والإغلاق أسفلها، مما يعزز حدوث انعكاس هبوطي سريع.`;
+      } else if (decision === 'SELL' && isPdlSweepReject) {
+        decision = 'NO_TRADE';
+        rejected_at_step = 'PDL Liquidity Sweep Trap (سحب سيولة قاع الأمس)';
+        reason = `⚠️ تم حظر البيع بواسطة درع سحب السيولة: تم رصد سحب سيولة أسفل قاع الأمس (PDL: $${dailyMacroBias.prevDailyLow.toFixed(price < 1 ? 4 : 2)}) وفشل الكسر مع إغلاق أعلاه، مما ينذر بارتداد صعودي سريع.`;
       }
     }
   }

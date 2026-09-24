@@ -398,6 +398,7 @@ export default function App() {
         entryPrice: record.entryPrice || ticker.price,
         oldStopLoss: record.stopLoss || 0,
         newStopLoss: record.entryPrice || 0,
+        tp1Price: record.target50PercentPrice || record.takeProfit1 || ticker.price,
         stage: 'BREAKEVEN',
         targetHitName: 'وصول السعر إلى 50% من مشوار الهدف',
       }).catch(() => {});

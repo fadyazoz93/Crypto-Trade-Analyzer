@@ -12,6 +12,7 @@ export interface NotifiedSignalRecord {
   entryPrice?: number;
   stopLoss?: number;
   targetPrice?: number;
+  takeProfit1?: number;
   target50PercentPrice?: number;
   lockProfitPrice?: number;
   securityUpdateSent?: boolean;

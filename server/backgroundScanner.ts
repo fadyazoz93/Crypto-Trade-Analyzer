@@ -237,6 +237,7 @@ class BackgroundScannerDaemon {
                   takeProfit2: analysis.trade_setup?.take_profit_2,
                   takeProfit3: analysis.trade_setup?.take_profit_3,
                   takeProfit4: analysis.trade_setup?.take_profit_4,
+                  target50PercentPrice: analysis.trade_setup?.target50PercentPrice,
                   riskRewardRatio: analysis.trade_setup?.risk_reward_ratio,
                   sopScore: sop,
                   reason: analysis.reason,
@@ -465,6 +466,7 @@ class BackgroundScannerDaemon {
               entryPrice: entry,
               oldStopLoss: oldSl,
               newStopLoss: trade.currentStopLoss,
+              tp1Price: trade.target50Price || trade.tp1 || curPrice,
               targetHitName: 'وصول السعر إلى 50% من مشوار الهدف',
               stage: 'BREAKEVEN',
               reason: 'وصل السعر بنجاح إلى 50% من مشوار الهدف، يرجى إغلاق 50% من العقود كاش ونقل وقف الخسارة لسعر الدخول لتأمين الصفقة بالكامل.',
@@ -473,34 +475,29 @@ class BackgroundScannerDaemon {
           }
         }
 
-        // 4. المرحلة الثانية: نقل الوقف وتتبعه مع الأرباح المتقدمة (Trailing SL)
-        // يُفعَّل عندما يواصل السعر مساره بعد 50% نحو الأهداف المتقدمة
-        if (reachedTarget50 && (trade.stage === 'LOCK_PROFIT_0_5R' || trade.stage === 'BREAKEVEN')) {
-          trade.halfway50Hit = true;
+        // 4. المرحلة الثانية: تحديث الأرباح ونقل الوقف إلى 1.0R عند وصول السعر إلى 1.5R
+        // يُفعَّل عند تحقيق أرباح 1.5R لنقل وقف الخسارة إلى +1.0R ربح مؤكد
+        const target1_5R = isBuy ? (entry + 1.5 * riskDist) : (entry - 1.5 * riskDist);
+        const reached1_5R = isBuy ? curPrice >= target1_5R : curPrice <= target1_5R;
+
+        if (reached1_5R && !trade.tp2Hit && (trade.stage === 'BREAKEVEN' || trade.stage === 'INITIAL' || trade.stage === 'LOCK_PROFIT_0_5R')) {
+          trade.tp2Hit = true;
           const oldSl = trade.currentStopLoss;
 
-          // عند وصول السعر لنصف المشوار، يتم حجز نصف الأرباح المقطوعة خلف السعر (بين الدخول والسعر الحالي)
-          // أو بمسافة 1.5 ATR خلف السعر الحالي، مع ضمان أنه أسفل السعر الحالي في الشراء وأعلى منه في البيع
-          const rawCalculatedSl = isBuy
-            ? Math.max(entry + (curPrice - entry) * 0.5, trade.tp1, curPrice - (1.5 * trade.atr))
-            : Math.min(entry - (entry - curPrice) * 0.5, trade.tp1, curPrice + (1.5 * trade.atr));
-
-          // قيد أمان صارم: الوقف الجديد يجب أن يبتعد عن السعر الحالي بهامش أمان كافٍ
-          const safeSl = isBuy
-            ? Math.min(rawCalculatedSl, curPrice - (trade.atr * 0.5))
-            : Math.max(rawCalculatedSl, curPrice + (trade.atr * 0.5));
-
-          const newSl = Number(safeSl.toFixed(curPrice < 1 ? 6 : 4));
+          // نقل وقف الخسارة إلى +1.0R ربح مؤكد
+          const lock1R = isBuy ? (entry + 1.0 * riskDist) : (entry - 1.0 * riskDist);
+          const decimalPrecision = curPrice < 1 ? 6 : curPrice < 10 ? 3 : 2;
+          const newSl = Number(lock1R.toFixed(decimalPrecision));
 
           const isValidSl = isBuy ? newSl < curPrice : newSl > curPrice;
           const isBetterSl = isBuy ? newSl > oldSl : newSl < oldSl;
 
           if (isValidSl && isBetterSl) {
             trade.currentStopLoss = newSl;
-            trade.stage = 'TRAILING_50_LOCK';
+            trade.stage = 'TRAILING_LOCK_1';
             trade.lastTrailingNotifyAt = now;
 
-            console.log(`[Trailing Stop] 🎯 ${symbol}: 50% Target Midpoint reached! Trailing SL moved to $${trade.currentStopLoss}`);
+            console.log(`[Trailing Stop] 🚀 ${symbol}: 1.5R reached! Trailing SL moved to +1.0R ($${trade.currentStopLoss})`);
             await sendTelegramTrailingStopUpdate({
               symbol,
               decision: trade.decision,
@@ -508,9 +505,9 @@ class BackgroundScannerDaemon {
               entryPrice: entry,
               oldStopLoss: oldSl,
               newStopLoss: trade.currentStopLoss,
-              targetHitName: 'الوصول إلى 50% من مشوار الهدف (نصف مسافة الصفقة)',
-              stage: 'TRAILING_50_LOCK',
-              reason: 'وصل السعر بنجاح إلى 50% من مشوار الصفقة نحو الهدف النهائي، وتم رفع وقف الخسارة لحجز نصف الأرباح وضمان خروج رابح.',
+              targetHitName: 'وصول السعر إلى 1.5R من الأرباح',
+              stage: 'TRAILING_LOCK',
+              reason: 'وصل السعر بنجاح إلى 1.5R من الأرباح، وتم رفع وقف الخسارة إلى 1.0R لحجز أرباح مؤكدة وحماية المكاسب.',
             });
             continue;
           }
