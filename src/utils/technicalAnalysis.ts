@@ -281,28 +281,22 @@ export function checkTradingTimeGuard(symbol?: string, now = new Date()): TimeGu
   };
 }
 
+// قائمة العملات الماسية الـ 8 المعتمدة حصراً (The Diamond Tier: BTC, ETH, SOL, BNB, XRP, AVAX, LINK, NEAR)
 export const POPULAR_SYMBOLS: SymbolInfo[] = [
   { symbol: 'BTCUSDT', name: 'Bitcoin', icon: '₿', category: 'Major' },
   { symbol: 'ETHUSDT', name: 'Ethereum', icon: 'Ξ', category: 'Major' },
   { symbol: 'SOLUSDT', name: 'Solana', icon: '◎', category: 'Layer1' },
   { symbol: 'BNBUSDT', name: 'BNB', icon: '🟡', category: 'Major' },
   { symbol: 'XRPUSDT', name: 'XRP', icon: '✕', category: 'Major' },
-  { symbol: 'ADAUSDT', name: 'Cardano', icon: '₳', category: 'Layer1' },
   { symbol: 'AVAXUSDT', name: 'Avalanche', icon: '🔺', category: 'Layer1' },
   { symbol: 'LINKUSDT', name: 'Chainlink', icon: '🔗', category: 'DeFi' },
-  { symbol: 'SUIUSDT', name: 'Sui', icon: '💧', category: 'Layer1' },
   { symbol: 'NEARUSDT', name: 'NEAR Protocol', icon: 'Ⓝ', category: 'Layer1' },
-  { symbol: 'LTCUSDT', name: 'Litecoin', icon: 'Ł', category: 'Major' },
-  { symbol: 'BCHUSDT', name: 'Bitcoin Cash', icon: '🪙', category: 'Major' },
-  { symbol: 'XLMUSDT', name: 'Stellar', icon: '🚀', category: 'Major' },
-  { symbol: 'UNIUSDT', name: 'Uniswap', icon: '🦄', category: 'DeFi' },
-  { symbol: 'DOTUSDT', name: 'Polkadot', icon: '●', category: 'Layer1' },
 ];
 
 /**
- * جلب قائمة الـ 15 عملة الأكثر تداولاً واستقراراً مع إثرائها ببيانات التغير اللحظي والسيولة من OKX API
+ * جلب قائمة العملات الماسية الـ 8 الأكثر استقراراً وسيولة مع إثرائها ببيانات التغير اللحظي والسيولة من OKX API
  */
-export async function fetchTopVolumeSymbols(limit = 15): Promise<SymbolInfo[]> {
+export async function fetchTopVolumeSymbols(limit = 8): Promise<SymbolInfo[]> {
   try {
     const data = await fetchOkxTopVolumeTickers(50);
 

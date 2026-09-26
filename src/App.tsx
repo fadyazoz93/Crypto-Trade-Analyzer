@@ -66,7 +66,7 @@ export default function App() {
   const refreshSymbols = useCallback(async () => {
     setSymbolsUpdating(true);
     try {
-      const topSymbols = await fetchTopVolumeSymbols(15);
+      const topSymbols = await fetchTopVolumeSymbols(8);
       setSymbols((prevSymbols) => {
         // Retain custom symbols added by user
         const customSymbols = prevSymbols.filter((s) => s.category === 'Custom');

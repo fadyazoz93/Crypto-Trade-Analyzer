@@ -97,12 +97,11 @@ class BackgroundScannerDaemon {
       flexibleMode: true,
     });
 
-    // Ensure primary high-liquidity symbols are always in list
+    // Ensure primary Diamond Tier symbols are always in list
     if (this.symbols.length === 0) {
       this.symbols = [
-        'BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'XRPUSDT',
-        'DOGEUSDT', 'ADAUSDT', 'AVAXUSDT', 'BNBUSDT',
-        'LINKUSDT', 'SUIUSDT', 'PEPEUSDT', 'NEARUSDT'
+        'BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'BNBUSDT',
+        'XRPUSDT', 'AVAXUSDT', 'LINKUSDT', 'NEARUSDT'
       ];
     }
   }
