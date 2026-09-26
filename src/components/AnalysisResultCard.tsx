@@ -58,8 +58,9 @@ export const AnalysisResultCard: React.FC<AnalysisResultCardProps> = ({ result, 
 🎯 **تفاصيل الدخول وإدارة المخاطر:**
 • سعر الدخول (Entry): $${trade_setup.entry_price}
 • وقف الخسارة (Stop Loss): $${trade_setup.stop_loss} (${trade_setup.stopLossPercent}%)
-• الهدف الأول (TP1): $${trade_setup.take_profit_1} (+${trade_setup.tp1Percent}%)
-• الهدف الثاني (TP2): $${trade_setup.take_profit_2} (+${trade_setup.tp2Percent}%)
+• الهدف الأول (TP1): $${trade_setup.take_profit_1} (+${trade_setup.tp1Percent}%) [إغلاق 50% كاش]
+• الوقف المتحرك (Trailing Stop): نسبة ${trade_setup.trailingCallbackPercent || (selectedSymbol.includes('BTC') ? 0.65 : selectedSymbol.includes('ETH') ? 0.75 : 0.85)}% تفعل عند TP1
+• الهدف الثاني (TP2): $${trade_setup.take_profit_2 || trade_setup.take_profit} (+${trade_setup.tp2Percent || trade_setup.tpPercent}%)
 • نسبة العائد للمخاطرة (R:R): ${trade_setup.risk_reward_ratio}
 • حجم اللوت المقترح: ${trade_setup.suggestedPositionUsdt ? `$${trade_setup.suggestedPositionUsdt}` : '1% مخاطرة'}
 
@@ -562,9 +563,10 @@ export const AnalysisResultCard: React.FC<AnalysisResultCardProps> = ({ result, 
             <div className="flex items-center gap-2">
               <TrendingUp className="w-4 h-4 text-emerald-400 shrink-0" />
               <div>
-                <div className="text-slate-400 font-medium text-[11px]">الوقف المتحرك (ATR Trailing):</div>
-                <div className="font-mono font-extrabold text-emerald-300">
-                  {trade_setup.trailingStopInitial ? `بداية عند $${trade_setup.trailingStopInitial}` : 'خوارزمي 1.5x ATR'}
+                <div className="text-slate-400 font-medium text-[11px]">الوقف المتحرك (Trailing Stop):</div>
+                <div className="font-mono font-extrabold text-emerald-300 text-xs">
+                  {trade_setup.trailingCallbackPercent || (selectedSymbol.includes('BTC') ? 0.65 : selectedSymbol.includes('ETH') ? 0.75 : 0.85)}% تراجع
+                  {trade_setup.take_profit_1 ? ` (يفعل عند TP1: $${trade_setup.take_profit_1})` : ''}
                 </div>
               </div>
             </div>

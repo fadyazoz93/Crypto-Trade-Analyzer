@@ -199,6 +199,8 @@ export interface DirectSignalPayload {
   timeframe?: string;
   binancePrice?: number;
   exchangeSource?: string;
+  trailingCallbackPercent?: number;
+  trailingDeltaUsdt?: number;
 }
 
 /**
@@ -447,6 +449,15 @@ export async function sendTelegramSignalDirect(payload: DirectSignalPayload): Pr
     const slDistPct = numEntry > 0 && numSl > 0 ? Math.abs(((numEntry - numSl) / numEntry) * 100) : 0;
     const formattedSlDist = slDistPct > 0 ? ` (${slDistPct.toFixed(2)}%)` : '';
 
+    // حساب نسبة الـ Trailing Stop المثالية (0.65% للبيتكوين، 0.75% للإيثيريوم، 0.85% للعملات البديلة)
+    const effectiveCallbackPct = payload.trailingCallbackPercent || (
+      normalizedSymbol.includes('BTC') ? 0.65 : normalizedSymbol.includes('ETH') ? 0.75 : 0.85
+    );
+    const trailingDeltaUsdtVal = payload.trailingDeltaUsdt || (
+      tp1Num > 0 ? Number((tp1Num * (effectiveCallbackPct / 100)).toFixed(numPrice < 1 ? 4 : 2)) : 0
+    );
+    const formattedTrailingDelta = trailingDeltaUsdtVal > 0 ? ` (أو ارتداد ${formatNumberVal(trailingDeltaUsdtVal)})` : '';
+
     const message = `${header}
 ════════════════════
 🪙 العملة / الزوج: ${normalizedSymbol}
@@ -455,6 +466,7 @@ ${executionTypeLine}
 💵 السعر اللحظي (OKX): ${formattedPrice}
 🔶 سعر Binance الموازي: ${parallelBinanceVal}
 🎯 الهدف الأول (TP1): ${formattedTp1} (50% من الربح لسحبها كاش بإغلاق 50% من العقد)
+🔄 الوقف المتحرك (Trailing Stop): نسبة ${effectiveCallbackPct}%${formattedTrailingDelta} تفعل تلقائياً بعد بلوغ TP1
 🎯 الهدف الثاني (TP2): ${formattedFinalTp} (الهدف النهائي من الربح)
 🛑 وقف الخسارة (SL): ${formattedSl}${formattedSlDist}
 🛡️ إدارة المخاطر: حدد حجم العقد بحيث لا تتجاوز الخسارة 1% من رأس المال`;

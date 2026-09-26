@@ -2464,6 +2464,8 @@ export async function analyzeIntradayMarketData(symbol: string): Promise<Analysi
       trailingStartPoints: 150,
       trailingDistancePoints: 100,
       trailingStepPoints: 20,
+      trailingCallbackPercent: symbol.toUpperCase().includes('BTC') ? 0.65 : symbol.toUpperCase().includes('ETH') ? 0.75 : 0.85,
+      trailingDeltaUsdt: Number((tp1Calculated * (symbol.toUpperCase().includes('BTC') ? 0.0065 : symbol.toUpperCase().includes('ETH') ? 0.0075 : 0.0085)).toFixed(decimalPlaces)),
       swingHigh: swingsH1.swingHigh,
       swingLow: swingsH1.swingLow,
       fibLevels,

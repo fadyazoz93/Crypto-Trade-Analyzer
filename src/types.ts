@@ -353,6 +353,8 @@ export interface TradeSetup {
   trailingStartPoints?: number;
   trailingDistancePoints?: number;
   trailingStepPoints?: number;
+  trailingCallbackPercent?: number; // نسبة التراجع للتريلنج ستوب (مثلاً 0.65% للبيتكوين و 0.85% للعملات البديلة)
+  trailingDeltaUsdt?: number; // مسافة التراجع بالدولار USDT للتريلنج ستوب
   fibonacciLevels?: FibonacciLevels;
   fibLevels?: FibonacciLevels;
   swingHigh?: SwingPoint;
