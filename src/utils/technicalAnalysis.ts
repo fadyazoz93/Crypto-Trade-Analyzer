@@ -2409,6 +2409,15 @@ export async function analyzeIntradayMarketData(symbol: string): Promise<Analysi
     const lotUnits = effectiveEntryPrice > 0 ? positionSizeUsdt / effectiveEntryPrice : 0;
     const tpPercent = (Math.abs(singleTpCalculated - effectiveEntryPrice) / effectiveEntryPrice) * 100;
 
+    // حساب نسبة الوقف المتحرك (Trailing Stop Callback Rate) ديناميكياً 100% بناءً على ATR فريم الـ 15 دقيقة اللحظي
+    // تتكيف تلقائياً مع سيولة ونبض وتقلب كل عملة لحظياً (Volatility-Adaptive ATR Trailing)
+    const rawAtr15mPercent = tp1Calculated > 0
+      ? (atr_15m / tp1Calculated) * 100
+      : (effectiveEntryPrice > 0 ? (atr_15m / effectiveEntryPrice) * 100 : 0.85);
+    // معامل تتبع احترافي (0.95x ATR 15M) يمنع الضرب العشوائي للوقف مع حجز أعلى قدر ممكن من الأرباح
+    const dynamicTrailingCallbackPercent = Math.max(0.40, Math.min(2.50, Number((rawAtr15mPercent * 0.95).toFixed(2))));
+    const dynamicTrailingDeltaUsdt = Number((tp1Calculated * (dynamicTrailingCallbackPercent / 100)).toFixed(decimalPlaces));
+
     trade_setup = {
       entry_price: effectiveEntryPrice,
       current_price: Number(price.toFixed(decimalPlaces)),
@@ -2464,8 +2473,8 @@ export async function analyzeIntradayMarketData(symbol: string): Promise<Analysi
       trailingStartPoints: 150,
       trailingDistancePoints: 100,
       trailingStepPoints: 20,
-      trailingCallbackPercent: symbol.toUpperCase().includes('BTC') ? 0.65 : symbol.toUpperCase().includes('ETH') ? 0.75 : 0.85,
-      trailingDeltaUsdt: Number((tp1Calculated * (symbol.toUpperCase().includes('BTC') ? 0.0065 : symbol.toUpperCase().includes('ETH') ? 0.0075 : 0.0085)).toFixed(decimalPlaces)),
+      trailingCallbackPercent: dynamicTrailingCallbackPercent,
+      trailingDeltaUsdt: dynamicTrailingDeltaUsdt,
       swingHigh: swingsH1.swingHigh,
       swingLow: swingsH1.swingLow,
       fibLevels,

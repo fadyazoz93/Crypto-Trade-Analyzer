@@ -449,10 +449,27 @@ export async function sendTelegramSignalDirect(payload: DirectSignalPayload): Pr
     const slDistPct = numEntry > 0 && numSl > 0 ? Math.abs(((numEntry - numSl) / numEntry) * 100) : 0;
     const formattedSlDist = slDistPct > 0 ? ` (${slDistPct.toFixed(2)}%)` : '';
 
-    // حساب نسبة الـ Trailing Stop المثالية (0.65% للبيتكوين، 0.75% للإيثيريوم، 0.85% للعملات البديلة)
-    const effectiveCallbackPct = payload.trailingCallbackPercent || (
-      normalizedSymbol.includes('BTC') ? 0.65 : normalizedSymbol.includes('ETH') ? 0.75 : 0.85
-    );
+    // حساب نسبة الـ Trailing Stop الديناميكية (من ATR 15M لكل عملة أو مشتقة من مسافة الوقف)
+    let effectiveCallbackPct = payload.trailingCallbackPercent;
+    if (!effectiveCallbackPct || effectiveCallbackPct <= 0) {
+      if (slDistPct > 0) {
+        effectiveCallbackPct = Math.max(0.40, Math.min(2.50, Number((slDistPct * 0.55).toFixed(2))));
+      } else if (normalizedSymbol.includes('BTC')) {
+        effectiveCallbackPct = 0.60;
+      } else if (normalizedSymbol.includes('ETH')) {
+        effectiveCallbackPct = 0.72;
+      } else if (normalizedSymbol.includes('SOL')) {
+        effectiveCallbackPct = 1.15;
+      } else if (normalizedSymbol.includes('LINK')) {
+        effectiveCallbackPct = 0.78;
+      } else if (normalizedSymbol.includes('BNB')) {
+        effectiveCallbackPct = 0.62;
+      } else if (normalizedSymbol.includes('XRP')) {
+        effectiveCallbackPct = 0.95;
+      } else {
+        effectiveCallbackPct = 0.85;
+      }
+    }
     const trailingDeltaUsdtVal = payload.trailingDeltaUsdt || (
       tp1Num > 0 ? Number((tp1Num * (effectiveCallbackPct / 100)).toFixed(numPrice < 1 ? 4 : 2)) : 0
     );
