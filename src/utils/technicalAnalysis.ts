@@ -17,13 +17,13 @@ export async function checkBtcCorrelationGuard(): Promise<BtcGuardStatus> {
       const btc24hChange = btcTicker.priceChangePercent;
 
       // 1. فحص الهبوط اليومي الحاد للبيتكوين (Daily Dump)
-      if (btc24hChange <= -2.5) {
+      if (btc24hChange <= -1.8) {
         return {
           isBtcSafe: false,
           btcTrend: 'BEARISH_DUMP',
           btcPrice,
           btc24hChange,
-          message: `⚠️ تحذير BTC Guard (OKX): البتكوين يمر بموجة هبوط حادة (${btc24hChange.toFixed(2)}%)! تم تفعيل الحظر الوقائي لصفقات الشراء على العملات البديلة.`,
+          message: `⚠️ تحذير BTC Guard (OKX): البتكوين يمر بموجة هبوط وتصحيح عامة (${btc24hChange.toFixed(2)}%)! تم تفعيل الحظر الوقائي لصفقات الشراء على العملات البديلة.`,
         };
       }
 
@@ -2369,6 +2369,49 @@ export async function analyzeIntradayMarketData(symbol: string): Promise<Analysi
     }
   }
 
+  // 6. درع السكاكين الهابطة والشموع الانفجارية المعاكسة (Falling Knife & Flash Dump Guard)
+  // يمنع نهائياً الشراء أثناء سقوط السعر بشمعة هبوطية متسارعة (Flash Dump)، أو البيع أثناء صعود انفجاري (Pump Squeeze)
+  if (data5m.candles && data5m.candles.length >= 2 && (decision === 'BUY' || decision === 'SELL')) {
+    const last5mCandle = data5m.candles[data5m.candles.length - 1];
+    const prev5mCandle = data5m.candles[data5m.candles.length - 2];
+    
+    if (decision === 'BUY') {
+      const isCurrentDumping = last5mCandle.close < last5mCandle.open &&
+        (last5mCandle.open - last5mCandle.close) >= atr_5m * 1.15;
+      const isPrevDumpingNoWick = prev5mCandle.close < prev5mCandle.open &&
+        (prev5mCandle.open - prev5mCandle.close) >= atr_5m * 1.25 &&
+        (prev5mCandle.close - prev5mCandle.low) <= (prev5mCandle.open - prev5mCandle.close) * 0.20;
+      
+      const last3Candles = data5m.candles.slice(-3);
+      const is3ConsecutiveDumps = last3Candles.length === 3 &&
+        last3Candles.every(c => c.close < c.open) &&
+        (last3Candles[0].open - last3Candles[2].close) >= atr_5m * 2.0;
+
+      if (isCurrentDumping || isPrevDumpingNoWick || is3ConsecutiveDumps) {
+        decision = 'NO_TRADE';
+        rejected_at_step = 'Falling Knife & Flash Dump Guard (درع السكاكين الهابطة على 5M)';
+        reason = `⚠️ تم حجب الشراء بواسطة درع السكاكين الهابطة: السعر يشهد شمعة هبوط متسارعة أو هبوطاً متتالياً على فريم 5M دون امتصاص شرائي كافٍ. تجنب التقاط السكين الهابطة حتى يهدأ الزخم البيعي وتتشكل قاعدة سعرية مستقرة.`;
+      }
+    } else if (decision === 'SELL') {
+      const isCurrentPumping = last5mCandle.close > last5mCandle.open &&
+        (last5mCandle.close - last5mCandle.open) >= atr_5m * 1.15;
+      const isPrevPumpingNoWick = prev5mCandle.close > prev5mCandle.open &&
+        (prev5mCandle.close - prev5mCandle.open) >= atr_5m * 1.25 &&
+        (prev5mCandle.high - prev5mCandle.close) <= (prev5mCandle.close - prev5mCandle.open) * 0.20;
+      
+      const last3Candles = data5m.candles.slice(-3);
+      const is3ConsecutivePumps = last3Candles.length === 3 &&
+        last3Candles.every(c => c.close > c.open) &&
+        (last3Candles[2].close - last3Candles[0].open) >= atr_5m * 2.0;
+
+      if (isCurrentPumping || isPrevPumpingNoWick || is3ConsecutivePumps) {
+        decision = 'NO_TRADE';
+        rejected_at_step = 'Flash Pump Squeeze Guard (درع الصعود الانفجاري على 5M)';
+        reason = `⚠️ تم حجب البيع بواسطة درع الصعود الانفجاري: السعر يشهد شمعة صعود متسارعة على 5M دون ظهور ذيل رفض علوي. تجنب البيع في مواجهة الشموع الدافعة حتى تهدأ الحركة.`;
+      }
+    }
+  }
+
   const timeGuard = checkTradingTimeGuard(symbol);
   if (!timeGuard.isSafe && (decision === 'BUY' || decision === 'SELL')) {
     decision = 'NO_TRADE';
@@ -2377,7 +2420,7 @@ export async function analyzeIntradayMarketData(symbol: string): Promise<Analysi
   }
 
   const btcGuard = await checkBtcCorrelationGuard();
-  if (settings.enableBtcGuard && !symbol.toUpperCase().includes('BTC') && decision === 'BUY' && !btcGuard.isBtcSafe) {
+  if (settings.enableBtcGuard !== false && !symbol.toUpperCase().includes('BTC') && decision === 'BUY' && !btcGuard.isBtcSafe) {
     decision = 'NO_TRADE';
     rejected_at_step = 'BTC Correlation Guard (فلتر اتجاه وزخم البتكوين)';
     reason = btcGuard.message;
@@ -2441,8 +2484,8 @@ export async function analyzeIntradayMarketData(symbol: string): Promise<Analysi
       atr15m: Number(atr_15m.toFixed(decimalPlaces)),
       atrValue: Number(atr_5m.toFixed(decimalPlaces)),
       riskDistance: Number(riskDist.toFixed(decimalPlaces)),
-      breakEvenPrice: Number((targetDir === 'BUY' ? effectiveEntryPrice * 1.0005 : effectiveEntryPrice * 0.9995).toFixed(decimalPlaces)),
-      beTriggerPrice: Number(tp1Calculated.toFixed(decimalPlaces)),
+      breakEvenPrice: Number((targetDir === 'BUY' ? effectiveEntryPrice * 1.0008 : effectiveEntryPrice * 0.9992).toFixed(decimalPlaces)),
+      beTriggerPrice: Number((targetDir === 'BUY' ? effectiveEntryPrice + (tp1Calculated - effectiveEntryPrice) * 0.50 : effectiveEntryPrice - (effectiveEntryPrice - tp1Calculated) * 0.50).toFixed(decimalPlaces)),
       trailingStopInitial: Number((targetDir === 'BUY' ? effectiveEntryPrice - atr_5m * 1.5 : effectiveEntryPrice + atr_5m * 1.5).toFixed(decimalPlaces)),
       target50PercentPrice: Number((targetDir === 'BUY' ? effectiveEntryPrice + (tp4Calculated - effectiveEntryPrice) * 0.5 : effectiveEntryPrice - (effectiveEntryPrice - tp4Calculated) * 0.5).toFixed(decimalPlaces)),
       trigger1_5AtrPrice: Number((targetDir === 'BUY' ? effectiveEntryPrice + (1.5 * atr_15m) : effectiveEntryPrice - (1.5 * atr_15m)).toFixed(decimalPlaces)),

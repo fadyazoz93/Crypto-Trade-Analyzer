@@ -240,6 +240,8 @@ class BackgroundScannerDaemon {
                   target50PercentPrice: analysis.trade_setup?.target50PercentPrice,
                   trailingCallbackPercent: analysis.trade_setup?.trailingCallbackPercent,
                   trailingDeltaUsdt: analysis.trade_setup?.trailingDeltaUsdt,
+                  beTriggerPrice: analysis.trade_setup?.beTriggerPrice,
+                  breakEvenPrice: analysis.trade_setup?.breakEvenPrice,
                   riskRewardRatio: analysis.trade_setup?.risk_reward_ratio,
                   sopScore: sop,
                   reason: analysis.reason,

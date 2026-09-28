@@ -201,6 +201,8 @@ export interface DirectSignalPayload {
   exchangeSource?: string;
   trailingCallbackPercent?: number;
   trailingDeltaUsdt?: number;
+  beTriggerPrice?: number;
+  breakEvenPrice?: number;
 }
 
 /**
@@ -475,6 +477,22 @@ export async function sendTelegramSignalDirect(payload: DirectSignalPayload): Pr
     );
     const formattedTrailingDelta = trailingDeltaUsdtVal > 0 ? ` (أو ارتداد ${formatNumberVal(trailingDeltaUsdtVal)})` : '';
 
+    const beTriggerVal = payload.beTriggerPrice || (
+      numEntry > 0 && tp1Num > 0
+        ? Number((numEntry + (tp1Num - numEntry) * 0.50).toFixed(numPrice < 1 ? 4 : 2))
+        : 0
+    );
+    const breakEvenVal = payload.breakEvenPrice || (
+      numEntry > 0
+        ? Number((numEntry * (isSell ? 0.9992 : 1.0008)).toFixed(numPrice < 1 ? 4 : 2))
+        : numEntry
+    );
+    const formattedBeTrigger = beTriggerVal > 0 ? formatNumberVal(beTriggerVal) : '';
+    const formattedBreakEven = breakEvenVal > 0 ? formatNumberVal(breakEvenVal) : '';
+    const autoBreakEvenLine = (beTriggerVal > 0 && breakEvenVal > 0)
+      ? `\n🛡️ تأمين الصفقة (Auto Break-Even): انقل الوقف إلى ${formattedBreakEven} فور وصول السعر إلى ${formattedBeTrigger} (50% نحو TP1)`
+      : '';
+
     const message = `${header}
 ════════════════════
 🪙 العملة / الزوج: ${normalizedSymbol}
@@ -482,7 +500,7 @@ ${executionTypeLine}
 🎯 سعر الدخول المقترح: ${formattedEntry}
 💵 السعر اللحظي (OKX): ${formattedPrice}
 🔶 سعر Binance الموازي: ${parallelBinanceVal}
-🎯 الهدف الأول (TP1): ${formattedTp1} (50% من الربح لسحبها كاش بإغلاق 50% من العقد)
+🎯 الهدف الأول (TP1): ${formattedTp1} (50% من الربح لسحبها كاش بإغلاق 50% من العقد)${autoBreakEvenLine}
 🔄 الوقف المتحرك (Trailing Stop): نسبة ${effectiveCallbackPct}%${formattedTrailingDelta} تفعل تلقائياً بعد بلوغ TP1
 🎯 الهدف الثاني (TP2): ${formattedFinalTp} (الهدف النهائي من الربح)
 🛑 وقف الخسارة (SL): ${formattedSl}${formattedSlDist}

@@ -59,6 +59,7 @@ export const AnalysisResultCard: React.FC<AnalysisResultCardProps> = ({ result, 
 • سعر الدخول (Entry): $${trade_setup.entry_price}
 • وقف الخسارة (Stop Loss): $${trade_setup.stop_loss} (${trade_setup.stopLossPercent}%)
 • الهدف الأول (TP1): $${trade_setup.take_profit_1} (+${trade_setup.tp1Percent}%) [إغلاق 50% كاش]
+• تأمين الصفقة (Auto Break-Even): انقل الوقف إلى $${trade_setup.breakEvenPrice || trade_setup.entry_price} فور وصول السعر إلى $${trade_setup.beTriggerPrice || trade_setup.target50PercentPrice} (50% نحو TP1)
 • الوقف المتحرك (Trailing Stop): نسبة ${trade_setup.trailingCallbackPercent || (trade_setup.stopLossPercent ? (trade_setup.stopLossPercent * 0.55).toFixed(2) : 0.85)}% تفعل عند TP1
 • الهدف الثاني (TP2): $${trade_setup.take_profit_2 || trade_setup.take_profit} (+${trade_setup.tp2Percent || trade_setup.tpPercent}%)
 • نسبة العائد للمخاطرة (R:R): ${trade_setup.risk_reward_ratio}
@@ -551,11 +552,11 @@ export const AnalysisResultCard: React.FC<AnalysisResultCardProps> = ({ result, 
             <div className="flex items-center gap-2">
               <Zap className="w-4 h-4 text-amber-400 shrink-0" />
               <div>
-                <div className="text-slate-400 font-medium text-[11px]">حجز الأرباح المضمونة (Lock Profit +0.5R):</div>
+                <div className="text-slate-400 font-medium text-[11px]">تأمين الدخول (Auto Break-Even):</div>
                 <div className="font-mono font-extrabold text-amber-300 text-xs">
-                  {trade_setup.target50PercentPrice && (trade_setup.quadScaleOut?.tp1_0_5r || trade_setup.beTriggerPrice)
-                    ? `عند $${trade_setup.target50PercentPrice} (50% TP) ارفع الوقف إلى $${trade_setup.quadScaleOut?.tp1_0_5r || trade_setup.beTriggerPrice} (+0.5R)`
-                    : `رفع الوقف إلى +0.5R عند تحقيق 50% من الهدف`}
+                  {trade_setup.beTriggerPrice
+                    ? `انقل الوقف إلى $${trade_setup.breakEvenPrice || trade_setup.entry_price} فور وصول السعر إلى $${trade_setup.beTriggerPrice} (50% نحو TP1)`
+                    : `تأمين الدخول عند 50% من المسافة نحو الهدف`}
                 </div>
               </div>
             </div>
