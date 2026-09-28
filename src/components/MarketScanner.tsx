@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { SymbolInfo, ScanItemResult, TradingMode, AnalysisResult } from '../types';
 import { scanMultipleSymbols, reEvaluateWithLivePrice } from '../utils/technicalAnalysis';
-import { sendTradeNotification } from '../utils/browserNotifications';
+import { sendTradeNotification, sendSecurityUpdateBrowserNotification } from '../utils/browserNotifications';
 import { sendTelegramSignal, sendTelegramSecurityUpdate } from '../utils/telegramNotifications';
 import { signalNotificationManager } from '../utils/tradeSignalNotifier';
 import { useOkxAllTickersWebSocket } from '../utils/useOkxWebSocket';
@@ -115,16 +115,23 @@ export const MarketScanner: React.FC<MarketScannerProps> = ({
 
     const actionText = item.decision === 'BUY' ? '🟢 شراء (BUY LONG)' : '🔴 بيع (SELL SHORT)';
     const matrix = item.analysis?.confluenceMatrix;
-    const text = `⚡ **توصية تداول فورية - ماسح السوق** ⚡
-الزوج: #${item.symbol}
-القرار: ${actionText}
-سعر الدخول: $${tradeSetup.entry_price}
-وقف الخسارة: $${tradeSetup.stop_loss} (${tradeSetup.stopLossPercent}%)
-الهدف الأول (TP1): $${tradeSetup.take_profit_1} (+${tradeSetup.tp1Percent}%)
-الهدف الثاني (TP2): $${tradeSetup.take_profit_2} (+${tradeSetup.tp2Percent}%)
-نسبة العائد: ${tradeSetup.risk_reward_ratio}
-${matrix ? `درجة التوافق: ${matrix.totalScore}/100 (${matrix.grade})` : ''}
-التوقيت: ${new Date().toLocaleTimeString('ar-EG')}`;
+    const text = `${actionText} | #${item.symbol}
+════════════════════
+📌 نوع الأمر: ${tradeSetup.entry_type === 'LIMIT' ? 'أمر معلق (Limit) عند التصحيح' : 'دخول فوري (Market)'}
+
+💰 مستويات الصفقة:
+▫️ سعر الدخول: $${tradeSetup.entry_price}
+▫️ الهدف الأول (TP1): $${tradeSetup.take_profit_1} (+${tradeSetup.tp1Percent}%) [حجز 50% أرباح]
+▫️ الهدف الثاني (TP2): $${tradeSetup.take_profit_2 || tradeSetup.take_profit} [الهدف النهائي]
+▫️ وقف الخسارة (SL): $${tradeSetup.stop_loss} (${tradeSetup.stopLossPercent}%-)
+
+⚙️ أوامر الحماية والتأمين:
+▫️ تأمين الدخول (Break-Even): انقل الوقف لسعر الدخول عند 50% من مشوار الهدف
+▫️ الوقف المتحرك (Trailing Stop): نسبة ${tradeSetup.trailingCallbackPercent || (tradeSetup.stopLossPercent ? (tradeSetup.stopLossPercent * 0.55).toFixed(2) : 0.85)}% تفعل عند TP1
+
+📊 السعر اللحظي: $${item.price}
+════════════════════
+⚠️ إدارة المخاطر: مخاطرة 1% كحد أقصى`;
 
     navigator.clipboard.writeText(text);
     setCopiedSymbol(item.symbol);
@@ -237,6 +244,14 @@ ${matrix ? `درجة التوافق: ${matrix.totalScore}/100 (${matrix.grade})`
               stage: 'BREAKEVEN',
               targetHitName: 'وصول السعر إلى 50% من مشوار الهدف',
             }).catch(() => {});
+
+            sendSecurityUpdateBrowserNotification(
+              record.symbol,
+              record.decision,
+              true,
+              record.entryPrice || livePrice,
+              '50% من مشوار الهدف'
+            ).catch(() => {});
           });
           if (item.analysis) {
             // Re-evaluate strategy conditions with new live WebSocket price

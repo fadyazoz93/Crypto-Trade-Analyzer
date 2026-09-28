@@ -390,7 +390,9 @@ export async function sendTelegramSignalDirect(payload: DirectSignalPayload): Pr
 
   try {
     const isBuy = decision === 'BUY';
-    const header = isBuy ? '📈 🟢 إشارة شراء مؤكدة (BUY)' : '📉 🔴 إشارة بيع مؤكدة (SELL)';
+    const header = isBuy
+      ? `🟢 <b>إشارة شراء مؤكدة (BUY) | #${normalizedSymbol}</b>`
+      : `🔴 <b>إشارة بيع مؤكدة (SELL) | #${normalizedSymbol}</b>`;
 
     const numPrice = Number(price);
     const numEntry = Number(entryPrice ?? price);
@@ -435,12 +437,12 @@ export async function sendTelegramSignalDirect(payload: DirectSignalPayload): Pr
     let executionTypeLine = '';
     if (isLimitOrder) {
       if (isBuy) {
-        executionTypeLine = `📌 نوع التنفيذ: أمر شراء معلق (Limit Order) عند التصحيح`;
+        executionTypeLine = `أمر معلق (Limit) عند التصحيح`;
       } else {
-        executionTypeLine = `📌 نوع التنفيذ: أمر بيع معلق (Limit Order) عند إعادة الاختبار`;
+        executionTypeLine = `أمر معلق (Limit) عند إعادة الاختبار`;
       }
     } else {
-      executionTypeLine = `📌 نوع التنفيذ: دخول فوري (Market Entry) بالسعر الحالي`;
+      executionTypeLine = `دخول فوري (Market)`;
     }
 
     const parallelBinanceVal = (parallelBinancePrice && parallelBinancePrice > 0)
@@ -449,7 +451,7 @@ export async function sendTelegramSignalDirect(payload: DirectSignalPayload): Pr
 
     const numSl = Number(stopLoss);
     const slDistPct = numEntry > 0 && numSl > 0 ? Math.abs(((numEntry - numSl) / numEntry) * 100) : 0;
-    const formattedSlDist = slDistPct > 0 ? ` (${slDistPct.toFixed(2)}%)` : '';
+    const formattedSlDist = slDistPct > 0 ? `(${slDistPct.toFixed(2)}%-)` : '';
 
     // حساب نسبة الـ Trailing Stop الديناميكية (من ATR 15M لكل عملة أو مشتقة من مسافة الوقف)
     let effectiveCallbackPct = payload.trailingCallbackPercent;
@@ -475,7 +477,7 @@ export async function sendTelegramSignalDirect(payload: DirectSignalPayload): Pr
     const trailingDeltaUsdtVal = payload.trailingDeltaUsdt || (
       tp1Num > 0 ? Number((tp1Num * (effectiveCallbackPct / 100)).toFixed(numPrice < 1 ? 4 : 2)) : 0
     );
-    const formattedTrailingDelta = trailingDeltaUsdtVal > 0 ? ` (أو ارتداد ${formatNumberVal(trailingDeltaUsdtVal)})` : '';
+    const formattedTrailingDelta = trailingDeltaUsdtVal > 0 ? ` (أو ${formatNumberVal(trailingDeltaUsdtVal)})` : '';
 
     const beTriggerVal = payload.beTriggerPrice || (
       numEntry > 0 && tp1Num > 0
@@ -490,21 +492,27 @@ export async function sendTelegramSignalDirect(payload: DirectSignalPayload): Pr
     const formattedBeTrigger = beTriggerVal > 0 ? formatNumberVal(beTriggerVal) : '';
     const formattedBreakEven = breakEvenVal > 0 ? formatNumberVal(breakEvenVal) : '';
     const autoBreakEvenLine = (beTriggerVal > 0 && breakEvenVal > 0)
-      ? `\n🛡️ تأمين الصفقة (Auto Break-Even): انقل الوقف إلى ${formattedBreakEven} فور وصول السعر إلى ${formattedBeTrigger} (50% نحو TP1)`
+      ? `▫️ <b>تأمين الدخول (Break-Even):</b>\n   انقل الوقف إلى <code>${formattedBreakEven}</code> عند وصول السعر إلى <code>${formattedBeTrigger}</code>\n`
       : '';
 
     const message = `${header}
 ════════════════════
-🪙 العملة / الزوج: ${normalizedSymbol}
-${executionTypeLine}
-🎯 سعر الدخول المقترح: ${formattedEntry}
-💵 السعر اللحظي (OKX): ${formattedPrice}
-🔶 سعر Binance الموازي: ${parallelBinanceVal}
-🎯 الهدف الأول (TP1): ${formattedTp1} (50% من الربح لسحبها كاش بإغلاق 50% من العقد)${autoBreakEvenLine}
-🔄 الوقف المتحرك (Trailing Stop): نسبة ${effectiveCallbackPct}%${formattedTrailingDelta} تفعل تلقائياً بعد بلوغ TP1
-🎯 الهدف الثاني (TP2): ${formattedFinalTp} (الهدف النهائي من الربح)
-🛑 وقف الخسارة (SL): ${formattedSl}${formattedSlDist}
-🛡️ إدارة المخاطر: حدد حجم العقد بحيث لا تتجاوز الخسارة 1% من رأس المال`;
+📌 <b>نوع الأمر:</b> ${executionTypeLine}
+
+💰 <b>مستويات الصفقة:</b>
+▫️ <b>سعر الدخول:</b> <code>${formattedEntry}</code>
+▫️ <b>الهدف الأول (TP1):</b> <code>${formattedTp1}</code> (حجز 50% أرباح)
+▫️ <b>الهدف الثاني (TP2):</b> <code>${formattedFinalTp}</code> (الهدف النهائي)
+▫️ <b>وقف الخسارة (SL):</b> <code>${formattedSl}</code> ${formattedSlDist}
+
+⚙️ <b>أوامر الحماية والتأمين:</b>
+${autoBreakEvenLine}▫️ <b>الوقف المتحرك (Trailing Stop):</b>
+   نسبة <code>${effectiveCallbackPct}%</code>${formattedTrailingDelta} تفعل تلقائياً عند TP1
+
+📊 <b>الأسعار اللحظية للمطابقة:</b>
+OKX: <code>${formattedPrice}</code> | Binance: <code>${parallelBinanceVal}</code>
+════════════════════
+⚠️ <b>إدارة المخاطر:</b> حدد حجم العقد بحيث لا تتجاوز الخسارة 1% من رأس المال`;
 
     const result = await sendTelegramMessage(message);
     if (result.ok) {
@@ -551,7 +559,18 @@ export interface EmergencyExitAlertPayload {
   reason: string;
 }
 
+export interface TradeClosedAlertPayload {
+  symbol: string;
+  decision: 'BUY' | 'SELL';
+  entryPrice: number;
+  exitPrice: number;
+  reason: 'TP_HIT' | 'SL_HIT' | 'BREAKEVEN_HIT';
+  initialStopLoss?: number;
+  targetPrice?: number;
+}
+
 const recentEmergencyAlerts = new Map<string, number>();
+const recentClosedTradeAlerts = new Map<string, number>();
 
 /**
  * إرسال تنبيه طوارئ للخروج السريع عند رصد هبوط مفاجئ في البيتكوين يهدد العملات البديلة
@@ -569,25 +588,98 @@ export async function sendTelegramEmergencyExitAlert(payload: EmergencyExitAlert
   recentEmergencyAlerts.set(normalizedSymbol, now);
 
   const isBuy = decision === 'BUY';
-  const formattedCur = `$${currentPrice < 1 ? currentPrice.toFixed(4) : currentPrice.toFixed(2)}`;
-  const formattedEntry = `$${entryPrice < 1 ? entryPrice.toFixed(4) : entryPrice.toFixed(2)}`;
-  const formattedSl = `$${currentStopLoss < 1 ? currentStopLoss.toFixed(4) : currentStopLoss.toFixed(2)}`;
-  const formattedBtc = `$${btcPrice.toLocaleString('en-US')}`;
+  const statusBadge = isBuy ? '🟢 شراء (LONG)' : '🔴 بيع (SHORT)';
+  const formattedCur = formatNumberVal(currentPrice);
+  const formattedEntry = formatNumberVal(entryPrice);
+  const formattedSl = formatNumberVal(currentStopLoss);
+  const formattedBtc = formatNumberVal(btcPrice);
+  const formattedDrop = `${btcDropPercent > 0 ? '-' : ''}${Math.abs(btcDropPercent).toFixed(2)}`;
 
-  const message = `🚨 <b>تنبيه طوارئ: انزلاق حاد في البيتكوين (${btcDropPercent > 0 ? '-' : ''}${Math.abs(btcDropPercent).toFixed(2)}%)!</b>
+  const message = `🚨 <b>تنبيه طوارئ | انزلاق حاد في البيتكوين (${formattedDrop}%)</b>
 ════════════════════
-🪙 <b>العملة المفتوحة:</b> ${symbol}
-🧭 <b>نوع الصفقة الحالية:</b> ${isBuy ? '🟢 شراء (LONG)' : '🔴 بيع (SHORT)'}
+🪙 <b>العملة المفتوحة:</b> <code>${normalizedSymbol}</code> | ${statusBadge}
+
+💰 <b>مستويات الأسعار اللحظية:</b>
+▫️ <b>سعر الدخول:</b> <code>${formattedEntry}</code>
+▫️ <b>السعر اللحظي:</b> <code>${formattedCur}</code>
+▫️ <b>وقف الخسارة المحدد:</b> <code>${formattedSl}</code>
+▫️ <b>سعر البيتكوين الآن:</b> <code>${formattedBtc}</code>
+
+⚠️ <b>السبب الفني:</b>
+${reason}
+
+💡 <b>الإجراء الموصى به فوراً:</b>
+▫️ يُنصح بالخروج اليدوي الفوري (Close Position) أو رفع وقف الخسارة لسعر الدخول.
+▫️ هبوط البيتكوين المفاجئ يسحب العملات البديلة لموجات بيع، والخروج السريع يوفر أكثر من 70% من خسارة الوقف الكامل!`;
+
+  try {
+    const result = await sendTelegramMessage(message);
+    return { success: result.ok, error: result.error };
+  } catch (err: any) {
+    return { success: false, error: err.message };
+  }
+}
+
+/**
+ * إرسال إشعار تليجرام عند إغلاق الصفقة (تحقيق الهدف الكامل أو الخروج على الوقف / الدخول)
+ */
+export async function sendTelegramTradeClosedAlert(payload: TradeClosedAlertPayload): Promise<{ success: boolean; error?: string }> {
+  const { symbol, decision, entryPrice, exitPrice, reason } = payload;
+  const normalizedSymbol = normalizeSymbolKey(symbol);
+
+  const now = Date.now();
+  const lastSent = recentClosedTradeAlerts.get(normalizedSymbol) || 0;
+  if (now - lastSent < 10 * 60 * 1000) {
+    return { success: true };
+  }
+  recentClosedTradeAlerts.set(normalizedSymbol, now);
+
+  const isBuy = decision === 'BUY';
+  const statusBadge = isBuy ? '🟢 شراء (LONG)' : '🔴 بيع (SHORT)';
+  const formattedEntry = formatNumberVal(entryPrice);
+  const formattedExit = formatNumberVal(exitPrice);
+
+  let message = '';
+
+  if (reason === 'TP_HIT') {
+    const gainPct = isBuy
+      ? ((exitPrice - entryPrice) / entryPrice) * 100
+      : ((entryPrice - exitPrice) / entryPrice) * 100;
+    message = `🏆 <b>تم تحقيق الهدف بالكامل وإغلاق الصفقة بنجاح!</b>
 ════════════════════
-📍 <b>سعر الدخول:</b> ${formattedEntry}
-💵 <b>السعر الحالي:</b> ${formattedCur}
-❌ <b>وقف الخسارة الأصلي:</b> ${formattedSl}
-⚡ <b>سعر البيتكوين اللحظي:</b> ${formattedBtc}
+🪙 <b>العملة:</b> <code>${normalizedSymbol}</code> | ${statusBadge}
+
+💰 <b>ملخص نتائج الصفقة:</b>
+▫️ <b>سعر الدخول:</b> <code>${formattedEntry}</code>
+▫️ <b>سعر الإغلاق النهائي:</b> <code>${formattedExit}</code>
+▫️ <b>صافي الربح المحقق:</b> <code>+${gainPct > 0 ? gainPct.toFixed(2) : '0.00'}%</code> 🚀
+
+🎯 <b>النتيجة:</b> تم إغلاق كامل العقود بأقصى ربح مخطط وبانضباط تام لإدارة المخاطر.`;
+  } else if (reason === 'BREAKEVEN_HIT') {
+    message = `🛡️ <b>تم إغلاق الصفقة على سعر الدخول (Break-Even Exit)</b>
 ════════════════════
-⚠️ <b>السبب الفني:</b> ${reason}
-💡 <b>الإجراء المقترح فوراً:</b>
-1️⃣ يُنصح بالخروج اليدوي الفوري (Close Position) أو رفع وقف الخسارة لسعر الدخول.
-2️⃣ هبوط البيتكوين المفاجئ يسحب العملات البديلة لموجات بيع قسرية، والخروج المبكر يوفر أكثر من 70% من خسارة الوقف الكامل!`;
+🪙 <b>العملة:</b> <code>${normalizedSymbol}</code> | ${statusBadge}
+
+💰 <b>ملخص النتائج:</b>
+▫️ <b>سعر الدخول:</b> <code>${formattedEntry}</code>
+▫️ <b>سعر الخروج:</b> <code>${formattedExit}</code>
+▫️ <b>صافي النتيجة:</b> <code>$0.00 ربح / خسارة (مخاطرة 0%)</code>
+
+✅ تم الخروج بأمان تام بعد جني أرباح 50% عند الهدف الأول مسبقاً، وبدون أي مساس برأس المال.`;
+  } else {
+    const lossPct = isBuy
+      ? ((entryPrice - exitPrice) / entryPrice) * 100
+      : ((exitPrice - entryPrice) / entryPrice) * 100;
+    message = `🛑 <b>إغلاق الصفقة: ضرب وقف الخسارة (Stop Loss Hit)</b>
+════════════════════
+🪙 <b>العملة:</b> <code>${normalizedSymbol}</code> | ${statusBadge}
+
+💰 <b>ملخص النتائج:</b>
+▫️ <b>سعر الدخول:</b> <code>${formattedEntry}</code>
+▫️ <b>سعر الخروج (الوقف):</b> <code>${formattedExit}</code> (${lossPct > 0 ? `-${lossPct.toFixed(2)}%` : '0%'})
+
+⚠️ <b>إدارة المخاطر:</b> تم احتواء الخسارة بنجاح ضمن الحد الصارم المسموح به (1% من الحساب). ننتظر الإشارة القادمة بأعلى معايير التوافق.`;
+  }
 
   try {
     const result = await sendTelegramMessage(message);
@@ -690,8 +782,8 @@ export async function sendTelegramTrailingStopUpdate(payload: TrailingStopUpdate
       : formattedCurPrice;
 
     const actionHeader = isLockProfit
-      ? `🛡️ <b>تحديث أمان: جني 50% أرباح ونقل وقف الخسارة لسعر الدخول (Breakeven)</b>`
-      : `🚀 <b>تحديث أرباح: حجز الأرباح وتعديل الوقف (Stop Trailing)</b>`;
+      ? `🛡️ <b>تأمين الصفقة | نقل الوقف لسعر الدخول (Break-Even)</b>`
+      : `🚀 <b>حجز الأرباح | رفع وقف الخسارة (Stop Trailing)</b>`;
 
     const statusBadge = isBuy ? `🟢 شراء (LONG)` : `🔴 بيع (SHORT)`;
 
@@ -699,34 +791,34 @@ export async function sendTelegramTrailingStopUpdate(payload: TrailingStopUpdate
     if (isLockProfit) {
       message = `${actionHeader}
 ════════════════════
-🪙 <b>العملة / الزوج:</b> <code>${normalizedSymbol}</code>
-🧭 <b>نوع الصفقة:</b> ${statusBadge}
-════════════════════
-📍 <b>سعر الدخول:</b> ${formattedEntry}
-💵 <b>السعر اللحظي (OKX):</b> ${formattedCurPrice}
-🔶 <b>سعر Binance الموازي:</b> ${parallelBinanceVal}
-════════════════════
-🎯 <b>المستوى المحقق:</b> وصول السعر إلى 50% من مشوار الهدف
-🎯 <b>سعر الهدف الأول (TP1):</b> <b>${formattedTp1}</b>
-💰 <b>جني الأرباح الجزئي:</b> إغلاق 50% من العقود كاش الآن عند سعر TP1 (${formattedTp1})
-❌ <b>وقف الخسارة السابق (Old SL):</b> ${formattedOldSl}
-🚨 <b>وقف الخسارة الجديد للتعديل فوراً (New SL):</b> <b>${formattedNewSl} (سعر الدخول)</b>
-🛡️ <b>إدارة المخاطر:</b> تم تأمين ربح نقدي وحماية ما تبقى من الصفقة مع ترك مساحة تنفس كاملة للتصحيح نحو الهدف النهائي.`;
+🪙 <b>العملة:</b> <code>${normalizedSymbol}</code> | ${statusBadge}
+
+💰 <b>مستويات الأسعار:</b>
+▫️ <b>سعر الدخول:</b> <code>${formattedEntry}</code>
+▫️ <b>السعر اللحظي:</b> <code>${formattedCurPrice}</code>
+▫️ <b>بينانس الموازي:</b> <code>${parallelBinanceVal}</code>
+▫️ <b>الهدف المحقق:</b> <code>${formattedTp1}</code> (تحقق بنجاح ✅)
+
+⚙️ <b>الإجراء المطلوب في المنصة (Binance / OKX):</b>
+1️⃣ <b>حجز أرباح:</b> أغلق <b>50%</b> من حجم العقد كاش.
+2️⃣ <b>تأمين الدخول:</b> انقل وقف الخسارة (Stop Loss) فوراً إلى: <code>${formattedNewSl}</code>
+
+🔒 <b>النتيجة:</b> الصفقة الآن مؤمنة بالكامل وخالية من أي مخاطرة (Risk-Free Trade)!`;
     } else {
       message = `${actionHeader}
 ════════════════════
-🪙 <b>العملة / الزوج:</b> <code>${normalizedSymbol}</code>
-🧭 <b>نوع الصفقة:</b> ${statusBadge}
-════════════════════
-📍 <b>سعر الدخول:</b> ${formattedEntry}
-💵 <b>السعر الحالي (OKX):</b> ${formattedCurPrice}
-🔶 <b>سعر Binance الموازي:</b> ${parallelBinanceVal}
-════════════════════
-🎯 <b>المستوى المحقق:</b> ${targetHitName || 'وصول السعر إلى 1.5R من الأرباح'}
-❌ <b>وقف الخسارة السابق (Old SL):</b> ${formattedOldSl}
-🚨 <b>وقف الخسارة الجديد للتعديل فوراً (New SL):</b> <b>${formattedNewSl} (+1.0R ربح مؤكد)</b>
-⚙️ <b>الإجراء المطلوب:</b> ${isBuy ? 'رفع الوقف لحجز أرباح 1.0R ⬆️' : 'خفض الوقف لحجز أرباح 1.0R ⬇️'}
-🛡️ <b>إدارة المخاطر:</b> تم حجز أرباح 1.0R كاملة وتأمينها في المحفظة حتى لو انعكس السعر.`;
+🪙 <b>العملة:</b> <code>${normalizedSymbol}</code> | ${statusBadge}
+
+💰 <b>مستويات الأسعار:</b>
+▫️ <b>سعر الدخول:</b> <code>${formattedEntry}</code>
+▫️ <b>السعر اللحظي:</b> <code>${formattedCurPrice}</code>
+▫️ <b>بينانس الموازي:</b> <code>${parallelBinanceVal}</code>
+▫️ <b>المستوى المحقق:</b> <b>${targetHitName || 'حجز الأرباح المتحركة'}</b> ✅
+
+⚙️ <b>الإجراء المطلوب في المنصة (Binance / OKX):</b>
+▫️ ارفع وقف الخسارة (Stop Loss) في المنصة فوراً إلى: <code>${formattedNewSl}</code>
+
+🔒 <b>النتيجة:</b> تم حجز وتأمين أرباحك في المحفظة حتى في حال حدوث أي تصحيح أو انعكاس!`;
     }
 
     const result = await sendTelegramMessage(message);
@@ -781,13 +873,20 @@ export default async function telegramHandler(req: VercelRequest, res: VercelRes
     const botName = info.bot?.first_name || 'Crypto Trade Analyzer';
     const username = info.bot?.username ? `@${info.bot.username}` : '@crypto_trade_analyzer_bot';
 
-    const testMsg = `🚀 <b>تم تفعيل إشعارات تليجرام بنجاح!</b>
-
-✅ تم ربط البوت <b>${botName}</b> (${username}) بنجاح.
+    const testMsg = `🚀 <b>تم تفعيل واختبار إشعارات تليجرام بنجاح!</b>
+════════════════════
+🤖 <b>اسم البوت:</b> <code>${botName}</code> (${username})
 💬 <b>معرف المحادثة (Chat ID):</b> <code>${chatId}</code>
 🕒 <b>التاريخ والوقت:</b> ${new Date().toLocaleString('ar-EG')}
+════════════════════
+📋 <b>الإشعارات الفعالة الآن في القناة:</b>
+▫️ <b>إشارات الدخول الفورية:</b> أسعار دقيقة ومطابقة مع Binance و OKX
+▫️ <b>تأمين الصفقات (Break-Even):</b> تنبيه لنقل الوقف لسعر الدخول
+▫️ <b>الوقف المتحرك (Trailing Stop):</b> تنبيهات حجز الأرباح خطوة بخطوة
+▫️ <b>تنبيهات الطوارئ:</b> تحذير فوري عند حدوث انزلاق مفاجئ في البيتكوين
+▫️ <b>إغلاق الصفقات:</b> توثيق الخروج على الأهداف أو الوقف بدقة
 
-⚡ <i>ستصلك هنا فورياً جميع إشارات الشراء والبيع والتحليلات الفنية المعتمدة من منصة التداول.</i>`;
+⚡ <i>جميع الإشعارات تعمل تلقائياً 24/7 دون الحاجة لفتح المتصفح.</i>`;
 
     const result = await sendTelegramMessage(testMsg);
     if (result.ok) {
@@ -802,6 +901,13 @@ export default async function telegramHandler(req: VercelRequest, res: VercelRes
         error: result.error || 'فشل إرسال رسالة الاختبار لتليجرام',
       });
     }
+  }
+
+  // Send Trade Closed Alert
+  if (action === 'trade_closed') {
+    const payload = req.body || {};
+    const resPayload = await sendTelegramTradeClosedAlert(payload);
+    return res.status(resPayload.success ? 200 : 500).json(resPayload);
   }
 
   // Send Trade Signal Alert or Trailing Stop Alert

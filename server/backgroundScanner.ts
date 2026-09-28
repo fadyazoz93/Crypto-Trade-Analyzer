@@ -6,7 +6,7 @@
  */
 
 import { analyzeMarketData, POPULAR_SYMBOLS, checkBtcCorrelationGuard } from '../src/utils/technicalAnalysis';
-import { sendTelegramSignalDirect, sendTelegramTrailingStopUpdate, sendTelegramEmergencyExitAlert } from '../api/telegram';
+import { sendTelegramSignalDirect, sendTelegramTrailingStopUpdate, sendTelegramEmergencyExitAlert, sendTelegramTradeClosedAlert } from '../api/telegram';
 import { recordSignalDirect } from '../api/turso';
 import { TradingMode } from '../src/types';
 import { setServerStrategySettings } from '../src/utils/settingsStore';
@@ -406,28 +406,35 @@ class BackgroundScannerDaemon {
         if (curPrice > trade.highestPrice) trade.highestPrice = curPrice;
         if (curPrice < trade.lowestPrice) trade.lowestPrice = curPrice;
 
-        // 1. فحص إذا ضرب السعر وقف الخسارة الحالي -> إغلاق المتابعة
-        if (isBuy && curPrice <= trade.currentStopLoss) {
+        // 1. فحص إذا ضرب السعر وقف الخسارة الحالي -> إغلاق المتابعة وإرسال إشعار للمتداول
+        if ((isBuy && curPrice <= trade.currentStopLoss) || (!isBuy && curPrice >= trade.currentStopLoss)) {
           trade.stage = 'CLOSED';
-          console.log(`[Trailing Stop] ${symbol} Hit Stop Loss ($${trade.currentStopLoss}). Closed tracking.`);
-          this.activeTrades.delete(symbol);
-          continue;
-        } else if (!isBuy && curPrice >= trade.currentStopLoss) {
-          trade.stage = 'CLOSED';
-          console.log(`[Trailing Stop] ${symbol} Hit Stop Loss ($${trade.currentStopLoss}). Closed tracking.`);
+          const isBreakevenExit = Math.abs(trade.currentStopLoss - trade.entryPrice) / trade.entryPrice < 0.005 || trade.stage === 'BREAKEVEN';
+          console.log(`[Trailing Stop] ${symbol} Closed at ${isBreakevenExit ? 'Breakeven' : 'Stop Loss'} ($${trade.currentStopLoss}).`);
+          sendTelegramTradeClosedAlert({
+            symbol,
+            decision: trade.decision,
+            entryPrice: trade.entryPrice,
+            exitPrice: trade.currentStopLoss,
+            reason: isBreakevenExit ? 'BREAKEVEN_HIT' : 'SL_HIT',
+            initialStopLoss: trade.initialStopLoss,
+          }).catch(() => {});
           this.activeTrades.delete(symbol);
           continue;
         }
 
-        // 2. فحص إذا ضرب الهدف النهائي TP4 (2.0R) -> إغلاق المتابعة بنجاح
-        if (isBuy && curPrice >= trade.tp4) {
+        // 2. فحص إذا ضرب الهدف النهائي TP4 (2.0R) -> إغلاق المتابعة بنجاح وإرسال إشعار للمتداول
+        if ((isBuy && curPrice >= trade.tp4) || (!isBuy && curPrice <= trade.tp4)) {
           trade.stage = 'CLOSED';
           console.log(`[Trailing Stop] ${symbol} Hit Final TP4 ($${trade.tp4}). Closed tracking with full profit!`);
-          this.activeTrades.delete(symbol);
-          continue;
-        } else if (!isBuy && curPrice <= trade.tp4) {
-          trade.stage = 'CLOSED';
-          console.log(`[Trailing Stop] ${symbol} Hit Final TP4 ($${trade.tp4}). Closed tracking with full profit!`);
+          sendTelegramTradeClosedAlert({
+            symbol,
+            decision: trade.decision,
+            entryPrice: trade.entryPrice,
+            exitPrice: trade.tp4,
+            reason: 'TP_HIT',
+            targetPrice: trade.tp4,
+          }).catch(() => {});
           this.activeTrades.delete(symbol);
           continue;
         }

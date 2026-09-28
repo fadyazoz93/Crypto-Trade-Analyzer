@@ -49,26 +49,23 @@ export const AnalysisResultCard: React.FC<AnalysisResultCardProps> = ({ result, 
   const handleCopyTradeSignal = () => {
     let text = '';
     if (trade_setup && !isNoTrade) {
-      text = `⚡ **توصية تداول فورية - محلل الصفقات ومصفوفة التوافق** ⚡
-الزوج: #${selectedSymbol}
-نوع الصفقة: ${isBuy ? '🟢 شراء (BUY / LONG)' : '🔴 بيع (SELL / SHORT)'}
-درجة التوافق المؤسسي: ${confluenceMatrix ? `${confluenceMatrix.totalScore}/100 (${confluenceMatrix.grade})` : 'مؤكدة'}
-السعر اللحظي: $${indicators.price}
+      text = `${isBuy ? '🟢 إشارة شراء مؤكدة' : '🔴 إشارة بيع مؤكدة'} | #${selectedSymbol}
+════════════════════
+📌 نوع الأمر: ${trade_setup.entry_type === 'LIMIT' ? 'أمر معلق (Limit) عند التصحيح' : 'دخول فوري (Market)'}
 
-🎯 **تفاصيل الدخول وإدارة المخاطر:**
-• سعر الدخول (Entry): $${trade_setup.entry_price}
-• وقف الخسارة (Stop Loss): $${trade_setup.stop_loss} (${trade_setup.stopLossPercent}%)
-• الهدف الأول (TP1): $${trade_setup.take_profit_1} (+${trade_setup.tp1Percent}%) [إغلاق 50% كاش]
-• تأمين الصفقة (Auto Break-Even): انقل الوقف إلى $${trade_setup.breakEvenPrice || trade_setup.entry_price} فور وصول السعر إلى $${trade_setup.beTriggerPrice || trade_setup.target50PercentPrice} (50% نحو TP1)
-• الوقف المتحرك (Trailing Stop): نسبة ${trade_setup.trailingCallbackPercent || (trade_setup.stopLossPercent ? (trade_setup.stopLossPercent * 0.55).toFixed(2) : 0.85)}% تفعل عند TP1
-• الهدف الثاني (TP2): $${trade_setup.take_profit_2 || trade_setup.take_profit} (+${trade_setup.tp2Percent || trade_setup.tpPercent}%)
-• نسبة العائد للمخاطرة (R:R): ${trade_setup.risk_reward_ratio}
-• حجم اللوت المقترح: ${trade_setup.suggestedPositionUsdt ? `$${trade_setup.suggestedPositionUsdt}` : '1% مخاطرة'}
+💰 مستويات الصفقة:
+▫️ سعر الدخول: $${trade_setup.entry_price}
+▫️ الهدف الأول (TP1): $${trade_setup.take_profit_1} (+${trade_setup.tp1Percent}%) [حجز 50% أرباح]
+▫️ الهدف الثاني (TP2): $${trade_setup.take_profit_2 || trade_setup.take_profit} (+${trade_setup.tp2Percent || trade_setup.tpPercent}%) [الهدف النهائي]
+▫️ وقف الخسارة (SL): $${trade_setup.stop_loss} (${trade_setup.stopLossPercent}%-)
 
-🛡️ **خوارزميات الحماية:**
-• تأمين الدخول (Break-Even): تلقائي عند 1:1 R:R
-• الوقف المتحرك: 1.5x ATR Trailing Stop
-• التوقيت: ${new Date().toLocaleTimeString('ar-EG')}`;
+⚙️ أوامر الحماية والتأمين:
+▫️ تأمين الدخول (Break-Even): انقل الوقف إلى $${trade_setup.breakEvenPrice || trade_setup.entry_price} عند وصول السعر إلى $${trade_setup.beTriggerPrice || trade_setup.target50PercentPrice}
+▫️ الوقف المتحرك (Trailing Stop): نسبة ${trade_setup.trailingCallbackPercent || (trade_setup.stopLossPercent ? (trade_setup.stopLossPercent * 0.55).toFixed(2) : 0.85)}% تفعل عند TP1
+
+📊 السعر اللحظي: $${indicators.price}
+════════════════════
+⚠️ إدارة المخاطر: مخاطرة 1% كحد أقصى (${trade_setup.suggestedPositionUsdt ? `$${trade_setup.suggestedPositionUsdt}` : '1%'})`;
     } else {
       text = `📊 **بيانات ومستويات #${selectedSymbol}**
 السعر اللحظي: $${indicators.price}
