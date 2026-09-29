@@ -294,6 +294,7 @@ export function getStrategySettings(): StrategySettings {
       ...DEFAULT_SETTINGS,
       ...parsed,
       flexibleMode: parsed.flexibleMode !== undefined ? Boolean(parsed.flexibleMode) : true,
+      enableBtcGuard: parsed.enableBtcGuard !== undefined ? Boolean(parsed.enableBtcGuard) : true,
       enableDailyMacroBias: parsed.enableDailyMacroBias !== undefined ? Boolean(parsed.enableDailyMacroBias) : true,
       dailyEmaPeriod: parsed.dailyEmaPeriod !== undefined && Number(parsed.dailyEmaPeriod) > 0 ? Number(parsed.dailyEmaPeriod) : 50,
       enableAutoTradeExecution: false, // Permanently disabled by user request

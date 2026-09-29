@@ -350,8 +350,6 @@ export interface TradeSetup {
   partialClosePercent?: number; // 25% per stage
   beTriggerRR?: number; // 0.5 R:R
   beOffsetPoints?: number; // +5 to +30 points
-  beTriggerPrice?: number; // سعر تفعيل تأمين الدخول (عند 50% من المسافة إلى TP1)
-  breakEvenPrice?: number; // سعر نقل الوقف إليه (سعر الدخول + تغطية الرسوم والانزلاق)
   trailingStartPoints?: number;
   trailingDistancePoints?: number;
   trailingStepPoints?: number;

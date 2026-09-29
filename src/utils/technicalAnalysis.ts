@@ -16,14 +16,15 @@ export async function checkBtcCorrelationGuard(): Promise<BtcGuardStatus> {
       const btcPrice = btcTicker.lastPrice;
       const btc24hChange = btcTicker.priceChangePercent;
 
-      // 1. فحص الهبوط اليومي الحاد للبيتكوين (Daily Dump)
-      if (btc24hChange <= -1.8) {
+      // 1. فحص الهبوط اليومي الحاد للبيتكوين (Daily Dump Guard)
+      // تم تشديد الحماية لحجب الشراء إذا كان البيتكوين هابطاً بأكثر من -1.2%
+      if (btc24hChange <= -1.2) {
         return {
           isBtcSafe: false,
           btcTrend: 'BEARISH_DUMP',
           btcPrice,
           btc24hChange,
-          message: `⚠️ تحذير BTC Guard (OKX): البتكوين يمر بموجة هبوط وتصحيح عامة (${btc24hChange.toFixed(2)}%)! تم تفعيل الحظر الوقائي لصفقات الشراء على العملات البديلة.`,
+          message: `⚠️ تحذير BTC Guard (حارس البيتكوين): البتكوين يمر بموجة هبوط وتصحيح (${btc24hChange.toFixed(2)}%)! تم تفعيل الحظر الوقائي التلقائي لصفقات الشراء على العملات البديلة لحماية الحساب.`,
         };
       }
 
@@ -42,14 +43,14 @@ export async function checkBtcCorrelationGuard(): Promise<BtcGuardStatus> {
               const liveDropFromHigh = ((currentLiveCandle.close - currentLiveCandle.high) / currentLiveCandle.high) * 100;
               const dollarDrop = Math.abs(currentLiveCandle.high - currentLiveCandle.close);
 
-              // إذا هبطت الشمعة الحية بأكثر من 0.35% أو أكثر من 300$
-              if (liveDropFromOpen <= -0.35 || liveDropFromHigh <= -0.45 || dollarDrop >= 350) {
+              // إذا هبطت الشمعة الحية بأكثر من 0.20% أو أكثر من 200$
+              if (liveDropFromOpen <= -0.20 || liveDropFromHigh <= -0.30 || dollarDrop >= 200) {
                 return {
                   isBtcSafe: false,
                   btcTrend: 'BEARISH_DUMP',
                   btcPrice,
                   btc24hChange,
-                  message: `⚠️ تحذير BTC Live Flash Drop Guard: البيتكوين يشهد هبوطاً لحظياً سريعاً (${liveDropFromOpen.toFixed(2)}% / -$${dollarDrop.toFixed(0)}) في الشمعة الحالية! تم تفعيل الحظر الوقائي لصفقات الشراء على العملات البديلة.`,
+                  message: `⚠️ تحذير BTC Live Flash Drop Guard: البيتكوين يشهد هبوطاً لحظياً سريعاً (${liveDropFromOpen.toFixed(2)}% / -$${dollarDrop.toFixed(0)})! تم حجب شراء العملات البديلة تلقائياً لتفادي الارتداد المعاكس.`,
                 };
               }
             }
@@ -57,13 +58,13 @@ export async function checkBtcCorrelationGuard(): Promise<BtcGuardStatus> {
             // ب) فحص الشمعة السابقة إذا أغلقت بهبوط خاطف (Previous Flash Drop)
             if (prevClosedCandle && prevClosedCandle.open > 0) {
               const prevDrop = ((prevClosedCandle.close - prevClosedCandle.open) / prevClosedCandle.open) * 100;
-              if (prevDrop <= -0.50) {
+              if (prevDrop <= -0.30) {
                 return {
                   isBtcSafe: false,
                   btcTrend: 'BEARISH_DUMP',
                   btcPrice,
                   btc24hChange,
-                  message: `⚠️ تحذير BTC Flash Drop Guard: البيتكوين أغلق شمعة 15M سابقة بهبوط حاد (${prevDrop.toFixed(2)}%)! حظر مؤقت لشراء العملات البديلة حتى تأكيد الارتداد.`,
+                  message: `⚠️ تحذير BTC Flash Drop Guard: البيتكوين أغلق شمعة 15M سابقة بهبوط (${prevDrop.toFixed(2)}%)! حظر وقائي لشراء العملات البديلة لحين استقرار السعر.`,
                 };
               }
             }
@@ -3322,6 +3323,14 @@ export async function analyzeScalpMarketData(symbol: string): Promise<AnalysisRe
     decision = 'NO_TRADE';
     rejected_at_step = 'Trading Time Guard (مُصفي الوقت الآمن)';
     reason = `⚠️ تم حجب المضاربة بواسطة مُصفي الوقت الآمن! (${timeGuard.windowName}).`;
+  }
+
+  // حارس البيتكوين الدائم (Always-On BTC Correlation Guard)
+  const btcGuard = await checkBtcCorrelationGuard();
+  if (settings.enableBtcGuard !== false && !symbol.toUpperCase().includes('BTC') && decision === 'BUY' && !btcGuard.isBtcSafe) {
+    decision = 'NO_TRADE';
+    rejected_at_step = 'BTC Correlation Guard (حارس اتجاه وزخم البتكوين الدائم)';
+    reason = btcGuard.message;
   }
 
   let trade_setup: TradeSetup | undefined;

@@ -207,6 +207,17 @@ class BackgroundScannerDaemon {
 
               // Check if decision is actionable and meets minimum SOP confirmation gates
               if ((analysis.decision === 'BUY' || analysis.decision === 'SELL') && sop >= this.minSopScore) {
+                // 0. حارس البيتكوين الدائم (Always-On BTC Guard): منع صفقات شراء العملات البديلة عند هبوط البيتكوين اللحظي
+                if (analysis.decision === 'BUY' && !symbol.toUpperCase().includes('BTC')) {
+                  const btcGuard = await checkBtcCorrelationGuard();
+                  if (!btcGuard.isBtcSafe) {
+                    console.log(
+                      `   🛡️ [BTC Guard Active] ${symbol}: تم حجب إشارة الشراء لأن البيتكوين يشهد هبوطاً أو ضغطاً بيعياً (${btcGuard.message}).`
+                    );
+                    return;
+                  }
+                }
+
                 // فلتر المسافة السعرية (Entry Proximity Gate): تجنب الإشارات التي يكون السعر الحالي فيها قد ابتعد كثيراً عن نقطة الدخول المحددة (> 1.2%)
                 const entryDistPct = Math.abs(analysis.trade_setup?.entryDistancePercent ?? 0);
                 if (analysis.trade_setup?.entry_type === 'LIMIT' && entryDistPct > 1.2) {
@@ -408,8 +419,9 @@ class BackgroundScannerDaemon {
 
         // 1. فحص إذا ضرب السعر وقف الخسارة الحالي -> إغلاق المتابعة وإرسال إشعار للمتداول
         if ((isBuy && curPrice <= trade.currentStopLoss) || (!isBuy && curPrice >= trade.currentStopLoss)) {
+          const prevStage = trade.stage;
           trade.stage = 'CLOSED';
-          const isBreakevenExit = Math.abs(trade.currentStopLoss - trade.entryPrice) / trade.entryPrice < 0.005 || trade.stage === 'BREAKEVEN';
+          const isBreakevenExit = Math.abs(trade.currentStopLoss - trade.entryPrice) / trade.entryPrice < 0.005 || prevStage === 'BREAKEVEN';
           console.log(`[Trailing Stop] ${symbol} Closed at ${isBreakevenExit ? 'Breakeven' : 'Stop Loss'} ($${trade.currentStopLoss}).`);
           sendTelegramTradeClosedAlert({
             symbol,

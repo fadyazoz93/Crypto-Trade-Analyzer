@@ -228,6 +228,26 @@ export const StrategySettingsModal: React.FC<StrategySettingsModalProps> = ({ is
             <span>3️⃣ قواطع الأمان التلقائية لمنع استنزاف الحساب (Safety Circuit Breakers)</span>
           </h3>
 
+          {/* Always-On BTC Guard Banner */}
+          <div className="p-3 bg-gradient-to-r from-amber-950/40 via-orange-950/30 to-slate-900 rounded-xl border border-amber-600/50 flex items-center justify-between flex-wrap gap-2 text-xs">
+            <div className="flex items-center gap-2">
+              <span className="p-1.5 rounded-lg bg-amber-500/20 text-amber-400 font-bold">🛡️ BTC Guard</span>
+              <div>
+                <span className="font-bold text-amber-200 block">حارس البيتكوين الصارم والدائم (Always-On BTC Guard)</span>
+                <span className="text-[11px] text-slate-400">حظر وقائي فوري لصفقات الشراء على كل العملات البديلة فور رصد أي هبوط أو ضغط بيعي على البيتكوين.</span>
+              </div>
+            </div>
+            <label className="flex items-center gap-2 cursor-pointer bg-slate-900/80 px-3 py-1.5 rounded-lg border border-amber-600/40">
+              <span className="text-[11px] font-bold text-emerald-400">مفعّل دائماً (Active)</span>
+              <input
+                type="checkbox"
+                checked={settings.enableBtcGuard ?? true}
+                onChange={(e) => setSettings({ ...settings, enableBtcGuard: e.target.checked })}
+                className="rounded border-slate-700 text-amber-500 focus:ring-amber-500 w-4 h-4 cursor-pointer"
+              />
+            </label>
+          </div>
+
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 text-xs">
             {/* Daily Max Loss */}
             <div className="p-3 bg-slate-900 rounded-xl border border-slate-800 space-y-2">

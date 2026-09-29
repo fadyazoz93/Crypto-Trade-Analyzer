@@ -486,7 +486,7 @@ export async function sendTelegramSignalDirect(payload: DirectSignalPayload): Pr
     );
     const breakEvenVal = payload.breakEvenPrice || (
       numEntry > 0
-        ? Number((numEntry * (isSell ? 0.9992 : 1.0008)).toFixed(numPrice < 1 ? 4 : 2))
+        ? Number((numEntry * (!isBuy ? 0.9992 : 1.0008)).toFixed(numPrice < 1 ? 4 : 2))
         : numEntry
     );
     const formattedBeTrigger = beTriggerVal > 0 ? formatNumberVal(beTriggerVal) : '';
