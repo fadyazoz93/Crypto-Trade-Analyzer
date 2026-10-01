@@ -621,6 +621,8 @@ export default function App() {
           <PositionCalculator
             tradeSetup={result?.trade_setup}
             price={result?.indicators.price || 0}
+            symbol={selectedSymbol}
+            symbols={symbols}
           />
         )}
 
