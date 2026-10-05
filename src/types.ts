@@ -172,6 +172,14 @@ export interface FairValueGap {
   barIndex: number;
 }
 
+export interface SopGannIctChecklistItem {
+  id: number;
+  condition: string;
+  source: 'SOP Gann (Where & When)' | 'Video 1 Trigger (5M)';
+  passed: boolean;
+  details: string;
+}
+
 export interface SweepMssFvgData {
   hasSweep: boolean;
   sweepLevel: number;
@@ -185,6 +193,13 @@ export interface SweepMssFvgData {
   recommendedEntry: number;
   dynamicAtrStopLoss: number;
   patternDescription: string;
+  isPdhPdlSweep?: boolean;
+  sweptLevelType?: 'PDH' | 'PDL' | 'GANN_ANGLE' | 'LOCAL_SWING';
+  gannWhereWhenConfirmed?: boolean;
+  fvgEntry50Percent?: number;
+  checklist?: SopGannIctChecklistItem[];
+  checklistPassedCount?: number;
+  allChecklistPassed?: boolean;
 }
 
 export interface ConfluenceScoringMatrix {

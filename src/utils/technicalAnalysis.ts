@@ -1864,7 +1864,17 @@ export async function analyzeIntradayMarketData(symbol: string): Promise<Analysi
   // ----------------------------------------------------
   // 1. INSTITUTIONAL TRIGGER (SWEEP + MSS + FVG INSTEAD OF BLIND LIMIT ORDERS)
   // ----------------------------------------------------
-  const sweepMssFvg = detectSweepMssFvg(data5m.candles, targetDir, nearestGann.price, atr_15m, price);
+  const sweepMssFvg = detectSweepMssFvg(
+    data5m.candles,
+    targetDir,
+    nearestGann.price,
+    atr_15m,
+    price,
+    dailyMacroBias.prevDailyHigh,
+    dailyMacroBias.prevDailyLow,
+    gannTime.isHarmonic,
+    isTouchingSq9
+  );
   const decimalPlaces = price < 1 ? 6 : 2;
 
   let calculatedEntry = price;
@@ -2857,7 +2867,17 @@ export async function analyzeScalpMarketData(symbol: string): Promise<AnalysisRe
   // حساب بروفايل الحجم والـ VWAP ونموذج كنس السيولة للمضاربة
   const sessionVwap = calculateSessionVwap(data15m.candles, price);
   const volumeProfile = calculateVolumeProfile(data15m.candles, price, nearestGann.price);
-  const sweepMssFvg = detectSweepMssFvg(data1m.candles, targetDir, nearestGann.price, atr_1m, price);
+  const sweepMssFvg = detectSweepMssFvg(
+    data1m.candles,
+    targetDir,
+    nearestGann.price,
+    atr_1m,
+    price,
+    dailyMacroBias.prevDailyHigh,
+    dailyMacroBias.prevDailyLow,
+    true,
+    isGate2Passed
+  );
 
   const gannPriceItem: ConfluenceItem = {
     category: 'PRICE_LEVEL',

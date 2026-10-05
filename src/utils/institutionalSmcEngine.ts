@@ -7,7 +7,7 @@
  * 4. Dynamic ATR Stop Loss: SL anchored to Sweep Low minus ATR volatility buffer.
  */
 
-import { CandleData, VolumeProfileData, VolumeProfileBin, SessionVwapData, FairValueGap, SweepMssFvgData } from '../types';
+import { CandleData, VolumeProfileData, VolumeProfileBin, SessionVwapData, FairValueGap, SweepMssFvgData, SopGannIctChecklistItem } from '../types';
 
 /**
  * 1. Calculate Volume Profile (POC, VAH, VAL) from Candlestick Data
@@ -245,7 +245,11 @@ export function detectSweepMssFvg(
   targetDir: 'BUY' | 'SELL',
   gannLevel: number,
   atr15m: number,
-  currentPrice: number
+  currentPrice: number,
+  pdhPrice?: number,
+  pdlPrice?: number,
+  gannTimeAligned?: boolean,
+  gannLevelConfluent?: boolean
 ): SweepMssFvgData {
   const n = candles5m.length;
   const decimalPlaces = currentPrice < 1 ? 6 : 2;
@@ -263,18 +267,26 @@ export function detectSweepMssFvg(
       recommendedEntry: currentPrice,
       dynamicAtrStopLoss: Number((targetDir === 'BUY' ? gannLevel - 1.25 * atr15m : gannLevel + 1.25 * atr15m).toFixed(decimalPlaces)),
       patternDescription: 'بيانات غير كافية لنموذج كنس السيولة والـ MSS',
+      checklist: [],
+      checklistPassedCount: 0,
+      allChecklistPassed: false,
     };
   }
 
-  // 1. Sweep Detection: Inspect candles in the last 10 bars around gannLevel
+  // 1. Sweep Detection: Inspect candles in the last 12 bars around gannLevel or PDH/PDL
   let hasSweep = false;
   let sweepLevel = targetDir === 'BUY' ? Infinity : -Infinity;
   let sweepWickRatio = 0;
   let sweepBarIdx = -1;
+  let sweptLevelType: 'PDH' | 'PDL' | 'GANN_ANGLE' | 'LOCAL_SWING' = 'LOCAL_SWING';
+  let isPdhPdlSweep = false;
 
-  // Recent swing low or gann level test
-  const lookbackStart = Math.max(0, n - 12);
-  for (let i = lookbackStart; i < n - 1; i++) {
+  const refTargetLevel = targetDir === 'BUY'
+    ? (pdlPrice && pdlPrice > 0 ? pdlPrice : gannLevel)
+    : (pdhPrice && pdhPrice > 0 ? pdhPrice : gannLevel);
+
+  const lookbackStart = Math.max(0, n - 14);
+  for (let i = lookbackStart; i < n; i++) {
     const c = candles5m[i];
     const spread = Math.max(0.000001, c.high - c.low);
 
@@ -282,42 +294,57 @@ export function detectSweepMssFvg(
       const lowerWick = Math.min(c.open, c.close) - c.low;
       const wickRatio = lowerWick / spread;
 
-      // Swiped below Gann level or previous lows with long rejection tail
-      if (c.low <= gannLevel * 1.002 && wickRatio >= 0.28) {
+      const isPdlBreached = Boolean(pdlPrice && pdlPrice > 0 && c.low <= pdlPrice * 1.0015);
+      const isGannBreached = c.low <= gannLevel * 1.0025;
+
+      if ((isPdlBreached || isGannBreached) && wickRatio >= 0.25) {
         hasSweep = true;
         if (c.low < sweepLevel) {
           sweepLevel = c.low;
           sweepWickRatio = Number(wickRatio.toFixed(2));
           sweepBarIdx = i;
+          if (isPdlBreached) {
+            sweptLevelType = 'PDL';
+            isPdhPdlSweep = true;
+          } else if (isGannBreached) {
+            sweptLevelType = 'GANN_ANGLE';
+          }
         }
       }
     } else {
       const upperWick = c.high - Math.max(c.open, c.close);
       const wickRatio = upperWick / spread;
 
-      if (c.high >= gannLevel * 0.998 && wickRatio >= 0.28) {
+      const isPdhBreached = Boolean(pdhPrice && pdhPrice > 0 && c.high >= pdhPrice * 0.9985);
+      const isGannBreached = c.high >= gannLevel * 0.9975;
+
+      if ((isPdhBreached || isGannBreached) && wickRatio >= 0.25) {
         hasSweep = true;
         if (c.high > sweepLevel) {
           sweepLevel = c.high;
           sweepWickRatio = Number(wickRatio.toFixed(2));
           sweepBarIdx = i;
+          if (isPdhBreached) {
+            sweptLevelType = 'PDH';
+            isPdhPdlSweep = true;
+          } else if (isGannBreached) {
+            sweptLevelType = 'GANN_ANGLE';
+          }
         }
       }
     }
   }
 
   if (!hasSweep || sweepLevel === Infinity || sweepLevel === -Infinity) {
-    sweepLevel = gannLevel;
+    sweepLevel = refTargetLevel || gannLevel;
   }
 
   // 2. Market Structure Shift (MSS) Detection
-  // Following the sweep, search for displacement candle breaking prior structure
   let hasMSS = false;
   let mssBrokenLevel = 0;
   let mssBarIndex = -1;
 
   if (targetDir === 'BUY') {
-    // Find prior minor swing high before sweep
     let priorHigh = 0;
     const refStart = Math.max(0, sweepBarIdx - 5);
     for (let i = refStart; i < Math.max(refStart + 1, sweepBarIdx); i++) {
@@ -330,7 +357,6 @@ export function detectSweepMssFvg(
       priorHigh = candles5m[Math.max(0, sweepBarIdx - 1)]?.high || currentPrice;
     }
 
-    // Did any candle after the sweep close above priorHigh?
     for (let i = Math.max(0, sweepBarIdx); i < n; i++) {
       if (candles5m[i].close > priorHigh) {
         hasMSS = true;
@@ -374,13 +400,12 @@ export function detectSweepMssFvg(
     barIndex: 0,
   };
 
-  const fvgSearchStart = Math.max(2, n - 6);
+  const fvgSearchStart = Math.max(2, n - 7);
   for (let i = fvgSearchStart; i < n; i++) {
     const cPrev = candles5m[i - 2];
     const cCurr = candles5m[i];
 
     if (targetDir === 'BUY') {
-      // Bullish FVG: Candle 1 High < Candle 3 Low (Gap between cPrev.high and cCurr.low)
       if (cCurr.low > cPrev.high) {
         hasFVG = true;
         const bottom = cPrev.high;
@@ -401,7 +426,6 @@ export function detectSweepMssFvg(
         break;
       }
     } else {
-      // Bearish FVG: Candle 1 Low > Candle 3 High
       if (cCurr.high < cPrev.low) {
         hasFVG = true;
         const top = cPrev.low;
@@ -424,42 +448,100 @@ export function detectSweepMssFvg(
     }
   }
 
-  // 4. Dynamic ATR Stop Loss:
-  // SL anchored to Sweep Low minus (1.25 x ATR_15M) for safe breathing room
+  // 4. Dynamic ATR Stop Loss (above/below the sweep high/low + 0.5 to 1.25 ATR)
   let dynamicAtrStopLoss: number;
   if (targetDir === 'BUY') {
-    dynamicAtrStopLoss = sweepLevel - (1.25 * atr15m);
-    // Safety: ensure SL is below entry and sweep level
+    dynamicAtrStopLoss = sweepLevel - (1.0 * atr15m);
     if (dynamicAtrStopLoss >= currentPrice) {
       dynamicAtrStopLoss = currentPrice - (1.25 * atr15m);
     }
   } else {
-    dynamicAtrStopLoss = sweepLevel + (1.25 * atr15m);
+    dynamicAtrStopLoss = sweepLevel + (1.0 * atr15m);
     if (dynamicAtrStopLoss <= currentPrice) {
       dynamicAtrStopLoss = currentPrice + (1.25 * atr15m);
     }
   }
 
-  // 5. Recommended Entry Trigger:
-  // If FVG is active, entry is optimal at FVG retest (or current live market price if breaking through)
+  // 5. Recommended Entry Trigger (Consequent Encroachment 50% of FVG or Live Market)
   let recommendedEntry = currentPrice;
+  const fvgEntry50Percent = fvg.mid > 0 ? fvg.mid : undefined;
   if (hasFVG && fvg.mid > 0) {
-    if (targetDir === 'BUY' && currentPrice >= fvg.bottom && currentPrice <= fvg.top * 1.002) {
+    if (targetDir === 'BUY' && currentPrice >= fvg.bottom && currentPrice <= fvg.top * 1.003) {
+      recommendedEntry = Number(fvg.mid.toFixed(decimalPlaces));
+    } else if (targetDir === 'SELL' && currentPrice <= fvg.top && currentPrice >= fvg.bottom * 0.997) {
       recommendedEntry = Number(fvg.mid.toFixed(decimalPlaces));
     }
   }
 
   const isPatternComplete = (hasSweep || hasMSS) && (hasFVG || hasMSS);
 
+  // 6. Build the 5-point SOP Checklist (Gann Where & When + Video 1 Execution Trigger)
+  const isGannPriceConfluent = Boolean(
+    gannLevelConfluent ||
+    (targetDir === 'SELL' && pdhPrice && Math.abs(pdhPrice - gannLevel) / gannLevel <= 0.008) ||
+    (targetDir === 'BUY' && pdlPrice && Math.abs(pdlPrice - gannLevel) / gannLevel <= 0.008)
+  );
+
+  const checklist: SopGannIctChecklistItem[] = [
+    {
+      id: 1,
+      condition: 'تطابق القمة/القاع مع مستوى أو زاوية جان (Gann Price Level)',
+      source: 'SOP Gann (Where & When)',
+      passed: isGannPriceConfluent,
+      details: isGannPriceConfluent
+        ? `تطابق هندسي مؤكد: زاوية جان ($${gannLevel.toFixed(decimalPlaces)}) تتطابق مع ${targetDir === 'SELL' ? `قمة الأمس PDH ($${(pdhPrice || gannLevel).toFixed(decimalPlaces)})` : `قاع الأمس PDL ($${(pdlPrice || gannLevel).toFixed(decimalPlaces)})`}`
+        : `زاوية جان ($${gannLevel.toFixed(decimalPlaces)}) غير متطابقة مع قمة/قاع الأمس`,
+    },
+    {
+      id: 2,
+      condition: 'نافذة الانعكاس الزمني لدورات جان (Gann Time Window)',
+      source: 'SOP Gann (Where & When)',
+      passed: Boolean(gannTimeAligned),
+      details: gannTimeAligned
+        ? `اليوم يمثل نافذة دورة زمنية توافقية لجان (144 Master Cycle أو √P) مؤهلة للانعكاس`
+        : `اليوم يقع خارج نافذة الانعكاس الزمني التوافقي لجان`,
+    },
+    {
+      id: 3,
+      condition: `كنس سيولة ${targetDir === 'SELL' ? 'قمة الأمس (PDH Sweep)' : 'قاع الأمس (PDL Sweep)'} بذيل شمعة 5M`,
+      source: 'Video 1 Trigger (5M)',
+      passed: hasSweep,
+      details: hasSweep
+        ? `تم رصد كنس سيولة (${sweptLevelType}) عند $${sweepLevel.toFixed(decimalPlaces)} بنسبة ذيل رفض ${(sweepWickRatio * 100).toFixed(0)}%`
+        : `بانتظار شمعة كنس السيولة حول ${targetDir === 'SELL' ? 'قمة الأمس' : 'قاع الأمس'}`,
+    },
+    {
+      id: 4,
+      condition: 'كسر هيكل السوق بإزاحة واضحة على فريم 5M (MSS)',
+      source: 'Video 1 Trigger (5M)',
+      passed: hasMSS,
+      details: hasMSS
+        ? `تم كسر الهيكل المصغر MSS وإغلاق شمعة دافعة متجاوزة المستوى $${mssBrokenLevel.toFixed(decimalPlaces)}`
+        : `بانتظار شمعة دافعة تكسر هيكل السوق على فريم 5 دقائق`,
+    },
+    {
+      id: 5,
+      condition: 'تشكل فجوة قيمة عادلة (FVG) ونقطة دخول عند منتصفها (50%)',
+      source: 'Video 1 Trigger (5M)',
+      passed: hasFVG,
+      details: hasFVG
+        ? `تشكلت فجوة FVG بين $${fvg.bottom} و $${fvg.top} (نقطة الدخول 50%: $${fvg.mid})`
+        : `لم تتشكل فجوة FVG نشطة بعد`,
+    },
+  ];
+
+  const checklistPassedCount = checklist.filter(c => c.passed).length;
+  const allChecklistPassed = checklistPassedCount === 5;
+
   let patternDescription = '';
-  if (hasSweep && hasMSS && hasFVG) {
-    patternDescription = `⚡ نموذج مؤسسي ثلاثي مكتمل (Sweep + MSS + FVG): كنس سيولة عند $${sweepLevel.toFixed(decimalPlaces)}، كسر بنية السوق MSS عند $${mssBrokenLevel.toFixed(decimalPlaces)}، وفجوة FVG عند $${fvg.bottom}-$${fvg.top}`;
+  if (allChecklistPassed) {
+    patternDescription = `🎯 نموذج متكامل بنسبة 100% (Gann Where & When + Video 1 Trigger): كنس ${sweptLevelType} عند $${sweepLevel.toFixed(decimalPlaces)} + كسر هيكل MSS عند $${mssBrokenLevel.toFixed(decimalPlaces)} + فجوة FVG عند $${fvg.mid}`;
   } else if (hasSweep && hasMSS) {
-    patternDescription = `🛡️ كنس سيولة وكسر هيكل (Sweep + MSS): كنس قاع السيولة عند $${sweepLevel.toFixed(decimalPlaces)} وتأكيد اندفاع المشتري المؤسسي`;
+    patternDescription = `🛡️ كنس سيولة وكسر هيكل (Sweep + MSS): كنس مستوى $${sweepLevel.toFixed(decimalPlaces)} وتأكيد إزاحة صانع السوق (${checklistPassedCount}/5 شروط)`;
   } else if (hasMSS) {
-    patternDescription = `تحول هيكل السوق (MSS): شمعة دافعة ابتلعت القمة السابقة ($${mssBrokenLevel.toFixed(decimalPlaces)}) تأكيداً للزخم`;
+    patternDescription = `تحول هيكل السوق (MSS): كسر المستوى $${mssBrokenLevel.toFixed(decimalPlaces)} تأكيداً للزخم`;
   } else {
-    patternDescription = `سلوك السيولة: بانتظار اكتمال شمعة كنس السيولة أو كسر بنية السوق MSS`;
+    patternDescription = `بانتظار كنس سيولة قمة/قاع الأمس أو كسر بنية السوق MSS`;
   }
 
   return {
@@ -475,5 +557,12 @@ export function detectSweepMssFvg(
     recommendedEntry: Number(recommendedEntry.toFixed(decimalPlaces)),
     dynamicAtrStopLoss: Number(dynamicAtrStopLoss.toFixed(decimalPlaces)),
     patternDescription,
+    isPdhPdlSweep,
+    sweptLevelType,
+    gannWhereWhenConfirmed: isGannPriceConfluent && Boolean(gannTimeAligned),
+    fvgEntry50Percent: fvgEntry50Percent ? Number(fvgEntry50Percent.toFixed(decimalPlaces)) : undefined,
+    checklist,
+    checklistPassedCount,
+    allChecklistPassed,
   };
 }

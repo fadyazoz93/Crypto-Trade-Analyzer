@@ -727,6 +727,68 @@ export const ConfluenceMatrixCard: React.FC<ConfluenceMatrixCardProps> = ({
               )}
             </div>
           </div>
+
+          {/* Checklist Table (قائمة الفحص الخماسية السريعة من الفيديو 1 + SOP Gann) */}
+          {sweepMssFvg?.checklist && sweepMssFvg.checklist.length > 0 && (
+            <div className="bg-slate-950/90 rounded-xl p-3.5 border border-slate-800 space-y-2.5">
+              <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2">
+                <div className="flex items-center gap-2">
+                  <ShieldCheck className="w-4 h-4 text-emerald-400" />
+                  <span className="text-xs font-bold text-white">
+                    قائمة الفحص الخماسية السريعة (Gann Where & When + Video 1 5M Trigger)
+                  </span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className={`px-2 py-0.5 rounded text-[10px] font-mono font-bold ${
+                    sweepMssFvg.allChecklistPassed
+                      ? 'bg-emerald-950 text-emerald-300 border border-emerald-600'
+                      : 'bg-slate-900 text-amber-300 border border-amber-800'
+                  }`}>
+                    اكتمال {sweepMssFvg.checklistPassedCount}/5 شروط
+                  </span>
+                  {sweepMssFvg.allChecklistPassed && (
+                    <span className="text-[10px] font-bold text-emerald-400 animate-pulse">
+                      دخول مسموح 🚀
+                    </span>
+                  )}
+                </div>
+              </div>
+
+              <div className="divide-y divide-slate-800/80 rounded-lg border border-slate-800/80 overflow-hidden text-xs">
+                {sweepMssFvg.checklist.map((item) => (
+                  <div key={item.id} className="p-2 sm:p-2.5 flex items-start sm:items-center justify-between gap-3 bg-slate-900/60 hover:bg-slate-900/90 transition">
+                    <div className="flex items-start gap-2.5">
+                      <span className={`mt-0.5 sm:mt-0 p-1 rounded-full ${
+                        item.passed ? 'bg-emerald-950 text-emerald-400 border border-emerald-700' : 'bg-slate-800 text-slate-500'
+                      }`}>
+                        {item.passed ? <CheckCircle2 className="w-3.5 h-3.5" /> : <XCircle className="w-3.5 h-3.5" />}
+                      </span>
+                      <div>
+                        <div className="font-bold text-slate-200 text-xs flex items-center gap-2 flex-wrap">
+                          <span>{item.condition}</span>
+                          <span className="text-[9px] px-1.5 py-0.2 rounded font-mono font-normal bg-slate-800 text-slate-400 border border-slate-700">
+                            {item.source}
+                          </span>
+                        </div>
+                        <div className="text-[11px] text-slate-400 mt-0.5 font-medium">
+                          {item.details}
+                        </div>
+                      </div>
+                    </div>
+                    <span className={`shrink-0 px-2 py-0.5 rounded text-[10px] font-bold font-mono ${
+                      item.passed ? 'bg-emerald-950/80 text-emerald-300 border border-emerald-700' : 'bg-rose-950/60 text-rose-300 border border-rose-800'
+                    }`}>
+                      {item.passed ? 'متحقق ✓' : 'غير مكتمل ✗'}
+                    </span>
+                  </div>
+                ))}
+              </div>
+
+              <p className="text-[10px] text-slate-400 italic">
+                * القاعدة الذهبية: جان يتكفل بـ "أين ومتى؟" (السعر والزمن)، واستراتيجية الفيديو 1 تتكفل بـ "كيف ندخل؟" (كنس السيولة + كسر الهيكل + FVG). إذا تحققت الشروط الخمسة تدخل الصفقة، وإذا اختل شرط تنتظر اكتمال النموذج.
+              </p>
+            </div>
+          )}
         </div>
       )}
 
