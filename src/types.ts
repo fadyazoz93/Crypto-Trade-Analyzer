@@ -118,16 +118,73 @@ export interface WyckoffSignalData {
 }
 
 export interface ConfluenceItem {
-  category: 'MACRO_TREND' | 'PRICE_LEVEL' | 'GANN_SLOPE' | 'TIME_CYCLE' | 'MOMENTUM' | 'WYCKOFF' | 'VOLUME' | 'RISK_REWARD';
+  category: 'MACRO_TREND' | 'PRICE_LEVEL' | 'GANN_SLOPE' | 'TIME_CYCLE' | 'MOMENTUM' | 'WYCKOFF' | 'VOLUME' | 'RISK_REWARD' | 'VOLUME_PROFILE' | 'VWAP' | 'MSS_FVG';
   name: string;
   nameAr: string;
   gateNumber?: number; // 1, 2, 3, 4, 5, 6
   score: number;
   maxScore: number;
   passed: boolean;
-  timeframe: '4H' | '1H' | '15M' | '5M' | '1M' | '4H / 5M' | '1H / 1M' | '1D / 4H' | '1D / 1H' | '1D';
+  timeframe: '4H' | '1H' | '15M' | '5M' | '1M' | '4H / 5M' | '1H / 1M' | '1D / 4H' | '1D / 1H' | '1D' | 'SESSION';
   description: string;
   details: string;
+}
+
+export interface VolumeProfileBin {
+  price: number;
+  volume: number;
+  isPOC: boolean;
+}
+
+export interface VolumeProfileData {
+  pocPrice: number; // Point of Control (مستوى أعلى حجم تداول)
+  vahPrice: number; // Value Area High (70% حد القيمة العلوي)
+  valPrice: number; // Value Area Low (70% حد القيمة السفلي)
+  isNearPOC: boolean;
+  isNearVAL: boolean;
+  isNearVAH: boolean;
+  totalVolume: number;
+  valueAreaPercent: number; // 70%
+  confluenceDescription: string;
+  bins: VolumeProfileBin[];
+}
+
+export interface SessionVwapData {
+  vwap: number; // متوسط السعر المرجح بالحجم للجلسة اليومية
+  upperBand1: number; // +1 Standard Deviation
+  upperBand2: number; // +2 Standard Deviation
+  lowerBand1: number; // -1 Standard Deviation
+  lowerBand2: number; // -2 Standard Deviation
+  isAboveVwap: boolean;
+  isBelowVwap: boolean;
+  distToVwapPercent: number;
+  flowDirection: 'BULLISH_INSTITUTIONAL' | 'BEARISH_INSTITUTIONAL' | 'NEUTRAL';
+  description: string;
+}
+
+export interface FairValueGap {
+  type: 'BULLISH_FVG' | 'BEARISH_FVG' | 'NONE';
+  top: number;
+  bottom: number;
+  mid: number;
+  sizePercent: number;
+  isMitigated: boolean;
+  barIndex: number;
+}
+
+export interface SweepMssFvgData {
+  hasSweep: boolean;
+  sweepLevel: number;
+  sweepWickRatio: number;
+  hasMSS: boolean;
+  mssBrokenLevel: number;
+  mssBarIndex?: number;
+  hasFVG: boolean;
+  fvg: FairValueGap;
+  isPatternComplete: boolean;
+  recommendedEntry: number;
+  dynamicAtrStopLoss: number;
+  patternDescription: string;
 }
 
 export interface ConfluenceScoringMatrix {
@@ -167,7 +224,7 @@ export interface ConfluenceScoringMatrix {
     tp3Percent: number;
     tp4Percent: number;
   };
-  structuralSLType?: 'WYCKOFF_EXTREME' | 'GANN_SWING_ANCHOR' | 'ATR_FALLBACK';
+  structuralSLType?: 'DYNAMIC_ATR_SWEEP' | 'WYCKOFF_EXTREME' | 'GANN_SWING_ANCHOR' | 'ATR_FALLBACK';
   rsiDivergence: {
     hasDivergence: boolean;
     type: 'BULLISH' | 'BEARISH' | 'NONE';
@@ -179,6 +236,9 @@ export interface ConfluenceScoringMatrix {
     histTurn: boolean;
     description: string;
   };
+  volumeProfile?: VolumeProfileData;
+  sessionVwap?: SessionVwapData;
+  sweepMssFvg?: SweepMssFvgData;
 }
 
 export interface FibonacciLevels {
@@ -343,8 +403,13 @@ export interface TradeSetup {
   sopScore?: number; // 4/5 or 5/5 (V41.00 Enterprise Protection Shield)
   wyckoffPattern?: string; // 'Spring/Shakeout' | 'LPS (No Supply)' | 'UTAD/Upthrust' | 'LPSY (No Demand)' | 'Standard Gann'
   wyckoffData?: WyckoffSignalData;
-  structuralSLType?: 'WYCKOFF_EXTREME' | 'GANN_SWING_ANCHOR' | 'ATR_FALLBACK';
+  structuralSLType?: 'DYNAMIC_ATR_SWEEP' | 'WYCKOFF_EXTREME' | 'GANN_SWING_ANCHOR' | 'ATR_FALLBACK';
   wyckoffExtremePrice?: number;
+  volumeProfile?: VolumeProfileData;
+  sessionVwap?: SessionVwapData;
+  sweepMssFvg?: SweepMssFvgData;
+  triggerType?: 'SWEEP_MSS_FVG' | 'DYNAMIC_LIMIT' | 'MARKET_MOMENTUM';
+  dynamicAtrStopLoss?: number;
   quadScaleOut?: QuadScaleOutSetup;
   // Multi-Scale EA Parameters
   partialClosePercent?: number; // 25% per stage
@@ -589,6 +654,9 @@ export interface AnalysisResult {
   sessionInfo?: TradingSessionInfo;
   candles15m?: CandleData[];
   tradingMode?: TradingMode;
+  volumeProfile?: VolumeProfileData;
+  sessionVwap?: SessionVwapData;
+  sweepMssFvg?: SweepMssFvgData;
   circuitBreaker?: {
     isSpikeActive: boolean;
     volumeMultiplier: number;

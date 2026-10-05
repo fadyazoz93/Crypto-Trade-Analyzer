@@ -7,11 +7,11 @@ interface IndicatorVisualizerProps {
 }
 
 export const IndicatorVisualizer: React.FC<IndicatorVisualizerProps> = ({ result }) => {
-  const { indicators, candles15m, decision, trade_setup } = result;
+  const { indicators, candles15m, decision, trade_setup, volumeProfile, sessionVwap } = result;
 
   const candles = candles15m || [];
-  const minPrice = Math.min(indicators.bb_lower_15m * 0.995, indicators.price * 0.995);
-  const maxPrice = Math.max(indicators.bb_upper_15m * 1.005, indicators.price * 1.005);
+  const minPrice = Math.min(indicators.bb_lower_15m * 0.995, indicators.price * 0.995, volumeProfile?.valPrice ? volumeProfile.valPrice * 0.998 : Infinity);
+  const maxPrice = Math.max(indicators.bb_upper_15m * 1.005, indicators.price * 1.005, volumeProfile?.vahPrice ? volumeProfile.vahPrice * 1.002 : -Infinity);
   const priceRange = Math.max(0.0001, maxPrice - minPrice);
 
   const height = 140;
@@ -138,6 +138,42 @@ export const IndicatorVisualizer: React.FC<IndicatorVisualizerProps> = ({ result
                 );
               })}
 
+              {/* Volume Profile POC Line */}
+              {volumeProfile && volumeProfile.pocPrice >= minPrice && volumeProfile.pocPrice <= maxPrice && (
+                <g>
+                  <line
+                    x1={padding}
+                    y1={getY(volumeProfile.pocPrice)}
+                    x2={width - padding}
+                    y2={getY(volumeProfile.pocPrice)}
+                    stroke="#f59e0b"
+                    strokeWidth="1.5"
+                    strokeDasharray="4 4"
+                  />
+                  <text x={padding + 6} y={getY(volumeProfile.pocPrice) - 3} fill="#f59e0b" fontSize="9" fontWeight="bold">
+                    POC (${volumeProfile.pocPrice})
+                  </text>
+                </g>
+              )}
+
+              {/* Session VWAP Line */}
+              {sessionVwap && sessionVwap.vwap >= minPrice && sessionVwap.vwap <= maxPrice && (
+                <g>
+                  <line
+                    x1={padding}
+                    y1={getY(sessionVwap.vwap)}
+                    x2={width - padding}
+                    y2={getY(sessionVwap.vwap)}
+                    stroke="#06b6d4"
+                    strokeWidth="1.5"
+                    strokeDasharray="3 3"
+                  />
+                  <text x={width / 2} y={getY(sessionVwap.vwap) - 3} fill="#06b6d4" fontSize="9" fontWeight="bold" textAnchor="middle">
+                    VWAP (${sessionVwap.vwap})
+                  </text>
+                </g>
+              )}
+
               {/* Current Price Line */}
               <line
                 x1={padding}
@@ -195,19 +231,25 @@ export const IndicatorVisualizer: React.FC<IndicatorVisualizerProps> = ({ result
             </div>
           </div>
 
-          {/* MACD & ATR Summary */}
+          {/* Volume Profile POC & Session VWAP Institutional Summary */}
           <div className="grid grid-cols-2 gap-2">
             <div className="space-y-1 bg-slate-900/90 p-2.5 rounded-lg border border-slate-800">
-              <div className="text-[11px] font-bold text-slate-300">زخم MACD (1H)</div>
-              <div className={`font-mono text-xs font-bold ${(indicators.macd_hist_1h ?? 0) > 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
-                {(indicators.macd_hist_1h ?? 0) > 0 ? 'صاعد 🟢' : 'هابط 🔴'} ({(indicators.macd_hist_1h ?? 0).toFixed(4)})
+              <div className="text-[11px] font-bold text-violet-300 flex items-center justify-between">
+                <span>بروفايل الحجم POC</span>
+                <span className="text-[9px] bg-violet-950 text-violet-300 px-1 rounded">Volume</span>
+              </div>
+              <div className="font-mono text-xs font-bold text-amber-300">
+                ${volumeProfile?.pocPrice.toFixed(indicators.price < 1 ? 4 : 2) || '—'}
               </div>
             </div>
 
             <div className="space-y-1 bg-slate-900/90 p-2.5 rounded-lg border border-slate-800">
-              <div className="text-[11px] font-bold text-slate-300">معدل التذبذب ATR (15M)</div>
-              <div className="font-mono text-xs font-bold text-cyan-300">
-                ${atrVal.toFixed(4)}
+              <div className="text-[11px] font-bold text-cyan-300 flex items-center justify-between">
+                <span>الـ VWAP المؤسسي</span>
+                <span className="text-[9px] bg-cyan-950 text-cyan-300 px-1 rounded">Session</span>
+              </div>
+              <div className={`font-mono text-xs font-bold ${sessionVwap?.isAboveVwap ? 'text-emerald-400' : 'text-rose-400'}`}>
+                ${sessionVwap?.vwap.toFixed(indicators.price < 1 ? 4 : 2) || '—'} {sessionVwap?.isAboveVwap ? '↗️' : '↘️'}
               </div>
             </div>
           </div>

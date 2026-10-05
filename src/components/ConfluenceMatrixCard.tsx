@@ -1,6 +1,6 @@
 import React from 'react';
 import { ConfluenceScoringMatrix, GannGeometryData, DailyMacroBiasStatus } from '../types';
-import { ShieldCheck, CheckCircle2, XCircle, Compass, Target, Clock, Zap, BarChart3, Scale, Sparkles, Activity, TrendingUp, Layers, ArrowUpRight, ArrowDownRight, Globe } from 'lucide-react';
+import { ShieldCheck, CheckCircle2, XCircle, Compass, Target, Clock, Zap, BarChart3, Scale, Sparkles, Activity, TrendingUp, Layers, ArrowUpRight, ArrowDownRight, Globe, Crosshair, ShieldAlert, Shield, Cpu, Flame } from 'lucide-react';
 
 interface ConfluenceMatrixCardProps {
   confluenceMatrix?: ConfluenceScoringMatrix;
@@ -40,6 +40,9 @@ export const ConfluenceMatrixCard: React.FC<ConfluenceMatrixCardProps> = ({
     gannSlopeData,
     reversalBarData,
     quadTargets,
+    volumeProfile,
+    sessionVwap,
+    sweepMssFvg,
   } = confluenceMatrix;
   const totalGatesCount = items.length || 5;
   const scorePercent = Math.min(100, Math.max(0, totalScore));
@@ -510,6 +513,218 @@ export const ConfluenceMatrixCard: React.FC<ConfluenceMatrixCardProps> = ({
               <div className="text-[10px] text-amber-400 font-sans font-bold">الهدف النهائي (2.0R Cap)</div>
               <div className="text-xs font-extrabold text-white">${quadTargets.tp4.toFixed(price < 1 ? 6 : 2)}</div>
               <div className="text-[9px] text-amber-300 font-sans font-bold">إغلاق كامل (Hard Cap 1:2)</div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 4.5. Institutional SMC & Modern Gann Suite (استبدال الأدوات التقليدية بالأدوات المؤسسية) */}
+      {(volumeProfile || sessionVwap || sweepMssFvg) && (
+        <div className="bg-slate-900/90 rounded-2xl p-4 border border-cyan-500/30 space-y-3.5 shadow-xl relative overflow-hidden">
+          <div className="absolute top-0 right-0 left-0 h-0.5 bg-gradient-to-r from-transparent via-cyan-400 to-transparent opacity-60" />
+          
+          <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2 pb-2.5 border-b border-slate-800">
+            <div className="flex items-center gap-2">
+              <span className="p-1.5 rounded-lg bg-cyan-950 border border-cyan-800 text-cyan-400">
+                <Cpu className="w-4 h-4" />
+              </span>
+              <div>
+                <h4 className="text-xs sm:text-sm font-black text-white flex items-center gap-2">
+                  <span>منظومة التداول المؤسسي الفائقة (SMC & Institutional Volume Engine)</span>
+                  <span className="text-[10px] px-2 py-0.5 rounded-full font-bold bg-cyan-950 text-cyan-300 border border-cyan-700">
+                    SOP Modernized
+                  </span>
+                </h4>
+                <p className="text-[11px] text-slate-400">
+                  استبدال الأدوات المتأخرة والعمياء بنماذج السيولة اللحظية المباشرة (Volume Profile • VWAP • Sweep+MSS • ATR Dynamic Stop)
+                </p>
+              </div>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-3">
+            {/* Tool 1: Volume Profile (POC / VAH / VAL) */}
+            <div className="bg-slate-950/90 rounded-xl p-3 border border-slate-800 space-y-2.5 flex flex-col justify-between">
+              <div>
+                <div className="flex justify-between items-start gap-1">
+                  <span className="text-xs font-bold text-violet-300 flex items-center gap-1.5">
+                    <BarChart3 className="w-3.5 h-3.5 text-violet-400" />
+                    1. بروفايل الحجم المؤسسي
+                  </span>
+                  <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-violet-950/80 text-violet-300 border border-violet-800">
+                    بديل MACD / BB
+                  </span>
+                </div>
+                <p className="text-[10px] text-slate-400 mt-1 leading-snug">
+                  تأكيد حجمي حقيقي دون تأخير زمني عند ملامسة زاوية جان
+                </p>
+              </div>
+
+              {volumeProfile ? (
+                <div className="space-y-1.5">
+                  <div className="grid grid-cols-3 gap-1 font-mono text-[10px]">
+                    <div className="bg-slate-900/80 p-1.5 rounded border border-slate-800 text-center">
+                      <span className="text-slate-500 block text-[9px]">أعلى حجم POC</span>
+                      <span className="text-amber-300 font-bold">${volumeProfile.pocPrice.toFixed(price < 1 ? 4 : 2)}</span>
+                    </div>
+                    <div className="bg-slate-900/80 p-1.5 rounded border border-slate-800 text-center">
+                      <span className="text-slate-500 block text-[9px]">قاع القيمة VAL</span>
+                      <span className="text-emerald-300 font-bold">${volumeProfile.valPrice.toFixed(price < 1 ? 4 : 2)}</span>
+                    </div>
+                    <div className="bg-slate-900/80 p-1.5 rounded border border-slate-800 text-center">
+                      <span className="text-slate-500 block text-[9px]">قمة القيمة VAH</span>
+                      <span className="text-rose-300 font-bold">${volumeProfile.vahPrice.toFixed(price < 1 ? 4 : 2)}</span>
+                    </div>
+                  </div>
+                  <div className={`p-1.5 rounded text-[10px] font-bold text-center border ${
+                    volumeProfile.isNearPOC
+                      ? 'bg-amber-950/60 border-amber-600 text-amber-300'
+                      : volumeProfile.isNearVAL
+                      ? 'bg-emerald-950/60 border-emerald-600 text-emerald-300'
+                      : 'bg-slate-900/80 border-slate-800 text-slate-300'
+                  }`}>
+                    {volumeProfile.isNearPOC
+                      ? '🎯 السعر يرتكز على خط أعلى حجم POC'
+                      : volumeProfile.isNearVAL
+                      ? '🛡️ السعر عند قاع منطقة القيمة VAL'
+                      : '📊 السعر داخل نطاق القيمة 70%'}
+                  </div>
+                </div>
+              ) : (
+                <div className="text-[10px] text-slate-500 italic">بانتظار اكتمال بيانات الحجم...</div>
+              )}
+            </div>
+
+            {/* Tool 2: Session VWAP & Flow */}
+            <div className="bg-slate-950/90 rounded-xl p-3 border border-slate-800 space-y-2.5 flex flex-col justify-between">
+              <div>
+                <div className="flex justify-between items-start gap-1">
+                  <span className="text-xs font-bold text-cyan-300 flex items-center gap-1.5">
+                    <Compass className="w-3.5 h-3.5 text-cyan-400" />
+                    2. الـ VWAP المؤسسي للجلسة
+                  </span>
+                  <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-cyan-950/80 text-cyan-300 border border-cyan-800">
+                    بديل 200 EMA
+                  </span>
+                </div>
+                <p className="text-[10px] text-slate-400 mt-1 leading-snug">
+                  يدمج السعر والحجم للجلسة لتحديد التدفق المالي للمؤسسات
+                </p>
+              </div>
+
+              {sessionVwap ? (
+                <div className="space-y-1.5">
+                  <div className="grid grid-cols-2 gap-1 font-mono text-[10px]">
+                    <div className="bg-slate-900/80 p-1.5 rounded border border-slate-800 text-center">
+                      <span className="text-slate-500 block text-[9px]">قيمة VWAP اليومي</span>
+                      <span className="text-cyan-300 font-bold">${sessionVwap.vwap.toFixed(price < 1 ? 4 : 2)}</span>
+                    </div>
+                    <div className="bg-slate-900/80 p-1.5 rounded border border-slate-800 text-center">
+                      <span className="text-slate-500 block text-[9px]">فارق المسافة</span>
+                      <span className={`font-bold ${sessionVwap.isAboveVwap ? 'text-emerald-400' : 'text-rose-400'}`}>
+                        {sessionVwap.distToVwapPercent > 0 ? `+${sessionVwap.distToVwapPercent}%` : `${sessionVwap.distToVwapPercent}%`}
+                      </span>
+                    </div>
+                  </div>
+                  <div className={`p-1.5 rounded text-[10px] font-bold text-center border ${
+                    sessionVwap.flowDirection === 'BULLISH_INSTITUTIONAL'
+                      ? 'bg-emerald-950/60 border-emerald-600 text-emerald-300'
+                      : 'bg-rose-950/60 border-rose-600 text-rose-300'
+                  }`}>
+                    {sessionVwap.flowDirection === 'BULLISH_INSTITUTIONAL'
+                      ? '↗️ تدفق مالي مؤسسي صاعد (أعلى VWAP)'
+                      : '↘️ تدفق مالي مؤسسي بيعي (أسفل VWAP)'}
+                  </div>
+                </div>
+              ) : (
+                <div className="text-[10px] text-slate-500 italic">بانتظار حساب VWAP...</div>
+              )}
+            </div>
+
+            {/* Tool 3: Sweep + MSS + FVG Trigger */}
+            <div className="bg-slate-950/90 rounded-xl p-3 border border-slate-800 space-y-2.5 flex flex-col justify-between">
+              <div>
+                <div className="flex justify-between items-start gap-1">
+                  <span className="text-xs font-bold text-emerald-300 flex items-center gap-1.5">
+                    <Crosshair className="w-3.5 h-3.5 text-emerald-400" />
+                    3. زناد الدخول الذكي (ICT)
+                  </span>
+                  <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-emerald-950/80 text-emerald-300 border border-emerald-800">
+                    بديل Limit Order
+                  </span>
+                </div>
+                <p className="text-[10px] text-slate-400 mt-1 leading-snug">
+                  كنس سيولة + كسر هيكل MSS + فجوة FVG بدلاً من الدخول الأعمى
+                </p>
+              </div>
+
+              {sweepMssFvg ? (
+                <div className="space-y-1.5">
+                  <div className="grid grid-cols-3 gap-1 font-mono text-[9px]">
+                    <div className="bg-slate-900/80 p-1.5 rounded border border-slate-800 text-center">
+                      <span className="text-slate-500 block">كنس السيولة</span>
+                      <span className={sweepMssFvg.hasSweep ? 'text-emerald-400 font-bold' : 'text-slate-400'}>
+                        {sweepMssFvg.hasSweep ? 'مكتمل ✓' : 'بانتظاره'}
+                      </span>
+                    </div>
+                    <div className="bg-slate-900/80 p-1.5 rounded border border-slate-800 text-center">
+                      <span className="text-slate-500 block">كسر الهيكل MSS</span>
+                      <span className={sweepMssFvg.hasMSS ? 'text-emerald-400 font-bold' : 'text-slate-400'}>
+                        {sweepMssFvg.hasMSS ? 'مؤكد ✓' : 'غير مؤكد'}
+                      </span>
+                    </div>
+                    <div className="bg-slate-900/80 p-1.5 rounded border border-slate-800 text-center">
+                      <span className="text-slate-500 block">فجوة FVG</span>
+                      <span className={sweepMssFvg.hasFVG ? 'text-amber-300 font-bold' : 'text-slate-400'}>
+                        {sweepMssFvg.hasFVG ? 'موجودة ⚡' : 'غير متوفرة'}
+                      </span>
+                    </div>
+                  </div>
+                  <div className="p-1.5 bg-slate-900/80 rounded border border-slate-800 text-[10px] text-slate-300 font-mono text-center">
+                    دخول: <strong className="text-white">${sweepMssFvg.recommendedEntry.toFixed(price < 1 ? 4 : 2)}</strong> ({sweepMssFvg.hasFVG ? 'إعادة اختبار FVG' : 'تنفيذ مباشر'})
+                  </div>
+                </div>
+              ) : (
+                <div className="text-[10px] text-slate-500 italic">بانتظار كنس السيولة...</div>
+              )}
+            </div>
+
+            {/* Tool 4: Dynamic ATR Stop Loss */}
+            <div className="bg-slate-950/90 rounded-xl p-3 border border-slate-800 space-y-2.5 flex flex-col justify-between">
+              <div>
+                <div className="flex justify-between items-start gap-1">
+                  <span className="text-xs font-bold text-rose-300 flex items-center gap-1.5">
+                    <ShieldAlert className="w-3.5 h-3.5 text-rose-400" />
+                    4. الوقف الديناميكي (ATR)
+                  </span>
+                  <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-rose-950/80 text-rose-300 border border-rose-800">
+                    بديل الوقف الثابت
+                  </span>
+                </div>
+                <p className="text-[10px] text-slate-400 mt-1 leading-snug">
+                  SL = Gann/Sweep - (n × ATR) لمنع الانزلاق والتكيف مع التقلب
+                </p>
+              </div>
+
+              {sweepMssFvg ? (
+                <div className="space-y-1.5">
+                  <div className="grid grid-cols-2 gap-1 font-mono text-[10px]">
+                    <div className="bg-slate-900/80 p-1.5 rounded border border-slate-800 text-center">
+                      <span className="text-slate-500 block text-[9px]">الوقف المحسوب (SL)</span>
+                      <span className="text-rose-400 font-bold">${sweepMssFvg.dynamicAtrStopLoss.toFixed(price < 1 ? 4 : 2)}</span>
+                    </div>
+                    <div className="bg-slate-900/80 p-1.5 rounded border border-slate-800 text-center">
+                      <span className="text-slate-500 block text-[9px]">مستوى الارتكاز</span>
+                      <span className="text-amber-300 font-bold">${sweepMssFvg.sweepLevel.toFixed(price < 1 ? 4 : 2)}</span>
+                    </div>
+                  </div>
+                  <div className="p-1.5 bg-rose-950/60 border border-rose-800 rounded text-[10px] font-mono text-rose-200 text-center font-bold">
+                    حماية مرنة: هامش تقلب تكيفي 1.25x - 1.5x ATR
+                  </div>
+                </div>
+              ) : (
+                <div className="text-[10px] text-slate-500 italic">بانتظار حساب الوقف التكيفي...</div>
+              )}
             </div>
           </div>
         </div>

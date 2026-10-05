@@ -1,6 +1,7 @@
-import { SymbolInfo, AnalysisResult, StepStatus, TradeSetup, CandleData, ScanItemResult, TimeGuardStatus, BtcGuardStatus, TradingMode, SpreadGuardStatus, TradingSessionInfo, ConfirmationLayerInfo, SwingPoint, FibonacciLevels, ConfluenceScoringMatrix, ConfluenceItem, GannGeometryData, GannLevel, MajorPivot, AnchorPointsResult, GannSlopeData, ReversalBarData, WyckoffSignalData, DailyMacroBiasStatus, IntradayProtectionShield, SafeExecutionMatrix } from '../types';
+import { SymbolInfo, AnalysisResult, StepStatus, TradeSetup, CandleData, ScanItemResult, TimeGuardStatus, BtcGuardStatus, TradingMode, SpreadGuardStatus, TradingSessionInfo, ConfirmationLayerInfo, SwingPoint, FibonacciLevels, ConfluenceScoringMatrix, ConfluenceItem, GannGeometryData, GannLevel, MajorPivot, AnchorPointsResult, GannSlopeData, ReversalBarData, WyckoffSignalData, DailyMacroBiasStatus, IntradayProtectionShield, SafeExecutionMatrix, VolumeProfileData, SessionVwapData, SweepMssFvgData } from '../types';
 import { getStrategySettings } from './settingsStore';
 import { calculateSquareOfNineLevels, calculateGannTimeCycles, checkRsiDivergence, checkMacdSignal, getLatestAnchorPoints, findMajorPivots, checkWyckoffSignal, isTrendSlopeHealthy, calculateStructuralSL } from './gannGeometry';
+import { calculateVolumeProfile, calculateSessionVwap, detectSweepMssFvg } from './institutionalSmcEngine';
 import { fetchOkxCandles, fetchOkxTicker, fetchOkxTopVolumeTickers, toOkxInstId, fromOkxInstId } from './okxApi';
 
 /**
@@ -1598,14 +1599,18 @@ export async function analyzeIntradayMarketData(symbol: string): Promise<Analysi
   const is1hBullishAlignment = price >= (ema200_1h_val * 0.997);
   const is1hBearishAlignment = price <= (ema200_1h_val * 1.003);
 
-  const isMacroTrendPassed = (targetDir === 'BUY' && is4hBullish && is15mBullishAlignment && is1hBullishAlignment) 
-    || (targetDir === 'SELL' && is4hBearish && is15mBearishAlignment && is1hBearishAlignment);
+  // 1.5 حساب الـ Session VWAP المؤسسي (Volume Weighted Average Price)
+  const sessionVwap = calculateSessionVwap(data15m.candles, price);
+  const isVwapAligned = targetDir === 'BUY' ? sessionVwap.isAboveVwap : sessionVwap.isBelowVwap;
+
+  const isMacroTrendPassed = ((targetDir === 'BUY' && is4hBullish && is15mBullishAlignment && is1hBullishAlignment && isVwapAligned) 
+    || (targetDir === 'SELL' && is4hBearish && is15mBearishAlignment && is1hBearishAlignment && isVwapAligned));
   const macroTrendScore = isMacroTrendPassed ? 20 : 0;
 
   const macroTrendItem: ConfluenceItem = {
     category: 'MACRO_TREND',
-    name: 'SOP 1: 4H Trend & Multi-TF 200 EMA Gatekeeper',
-    nameAr: 'البوابة 1: اتجاه وميل 200 EMA على 4H وتوافق 1H و 15M',
+    name: 'SOP 1: 4H Trend, 200 EMA & Session VWAP',
+    nameAr: 'البوابة 1: اتجاه 200 EMA على 4H وتدفق الـ VWAP المؤسسي',
     gateNumber: 1,
     score: macroTrendScore,
     maxScore: 20,
@@ -1613,12 +1618,16 @@ export async function analyzeIntradayMarketData(symbol: string): Promise<Analysi
     timeframe: '4H',
     description: isMacroTrendPassed
       ? (targetDir === 'BUY'
-          ? `مسار 4H صاعد متوافق مع محدد الاتجاه اليومي ومتوسطات 200 (4H/1H/15M): السعر ($${price.toFixed(price < 1 ? 6 : 2)}) أعلى 200 EMA بميل صاعد صحي (+${slopeHealth4h.slopePoints} pts)`
-          : `مسار 4H هابط متوافق مع محدد الاتجاه اليومي ومتوسطات 200 (4H/1H/15M): السعر ($${price.toFixed(price < 1 ? 6 : 2)}) أسفل 200 EMA بميل هابط صحي (-${slopeHealth4h.slopePoints} pts)`)
-      : (slopeHealth4h.isHealthy
-          ? `السعر محصور أو غير متوافق مع متوسط 200 EMA على الأطر الزمنية (${targetDir === 'BUY' ? 'مطلوب أعلى 200 EMA على 4H و 15M' : 'مطلوب أسفل 200 EMA على 4H و 15M'})`
-          : `ميل 200 EMA على 4H ضعيف أو مسطح (${slopeHealth4h.slopePoints} pts < ${settings.minEmaSlopePoints || 2.0} pts المطلوب)`),
-    details: `4H Close: $${h4Close.toFixed(price < 1 ? 4 : 2)} | 4H 200 EMA: $${ema200_4h.toFixed(price < 1 ? 4 : 2)} | 1H 200 EMA: $${ema200_1h_val.toFixed(price < 1 ? 4 : 2)} | 15M 200 EMA: $${ema200_15m.toFixed(price < 1 ? 4 : 2)} | ميل 4H: ${slopeHealth4h.directionOk ? 'سليم ↗️' : 'غير متطابق ↘️'} (${slopeHealth4h.slopePoints} pts) | المسار اليومي المصرح: ${dailyMacroBias.allowedDirection === 'BUY_ONLY' ? 'شراء فقط (Long)' : 'بيع فقط (Short)'}`,
+          ? `مسار 4H صاعد وتدفق VWAP مؤسسي صاعد (+${Math.abs(sessionVwap.distToVwapPercent)}% أعلى VWAP $${sessionVwap.vwap}) وميل 200 EMA (+${slopeHealth4h.slopePoints} pts)`
+          : `مسار 4H هابط وتدفق VWAP مؤسسي بيعي (-${Math.abs(sessionVwap.distToVwapPercent)}% أسفل VWAP $${sessionVwap.vwap}) وميل 200 EMA (-${slopeHealth4h.slopePoints} pts)`)
+      : (!isVwapAligned
+          ? (targetDir === 'BUY' 
+              ? `⚠️ تدفق مالي مؤسسي بيعي: السعر ($${price.toFixed(price < 1 ? 4 : 2)}) أسفل خط الـ VWAP اليومي ($${sessionVwap.vwap.toFixed(price < 1 ? 4 : 2)}) - تم تعليق الشراء حتى استعادة الـ VWAP`
+              : `⚠️ تدفق مالي مؤسسي شرائي: السعر أعلى خط الـ VWAP اليومي ($${sessionVwap.vwap.toFixed(price < 1 ? 4 : 2)}) - تم تعليق البيع`)
+          : (slopeHealth4h.isHealthy
+              ? `السعر محصور أو غير متوافق مع متوسط 200 EMA على الأطر الزمنية (${targetDir === 'BUY' ? 'مطلوب أعلى 200 EMA على 4H و 15M' : 'مطلوب أسفل 200 EMA على 4H و 15M'})`
+              : `ميل 200 EMA على 4H ضعيف أو مسطح (${slopeHealth4h.slopePoints} pts < ${settings.minEmaSlopePoints || 2.0} pts المطلوب)`)),
+    details: `4H Close: $${h4Close.toFixed(price < 1 ? 4 : 2)} | Session VWAP: $${sessionVwap.vwap.toFixed(price < 1 ? 4 : 2)} (${sessionVwap.flowDirection === 'BULLISH_INSTITUTIONAL' ? 'صاعد ↗️' : 'بيعي ↘️'}) | 4H 200 EMA: $${ema200_4h.toFixed(price < 1 ? 4 : 2)} | ميل 4H: ${slopeHealth4h.directionOk ? 'سليم ↗️' : 'غير متطابق ↘️'} (${slopeHealth4h.slopePoints} pts)`,
   };
 
   // 2. SOP 2: Multi-Cycle Square of 9 Confluence (20 Points)
@@ -1639,6 +1648,12 @@ export async function analyzeIntradayMarketData(symbol: string): Promise<Analysi
   const sq9ExactLevels = calculateSq9Exact(refPivotPrice);
   const gannCalculations = calculateSquareOfNineLevels(refPivotPrice, price);
   const nearestGann = targetDir === 'BUY' ? gannCalculations.nearestSupport : gannCalculations.nearestResistance;
+
+  // 2.5 حساب بروفايل السيولة الحجمية (Volume Profile: POC, VAH, VAL)
+  const volumeProfile = calculateVolumeProfile(data15m.candles, price, nearestGann.price);
+  const isVolumeProfileAligned = targetDir === 'BUY'
+    ? (volumeProfile.isNearPOC || volumeProfile.isNearVAL || price >= volumeProfile.valPrice)
+    : (volumeProfile.isNearPOC || volumeProfile.isNearVAH || price <= volumeProfile.vahPrice);
 
   const gannPriceItem: ConfluenceItem = {
     category: 'PRICE_LEVEL',
@@ -1847,79 +1862,61 @@ export async function analyzeIntradayMarketData(symbol: string): Promise<Analysi
   const isExecutionTrigger = isGate1Passed && passedGatesCount >= sopScoreNeeded;
 
   // ----------------------------------------------------
-  // 1. OPTIMAL ENTRY PRICE DETERMINATION (GANN PULLBACK OR LIVE MARKET)
+  // 1. INSTITUTIONAL TRIGGER (SWEEP + MSS + FVG INSTEAD OF BLIND LIMIT ORDERS)
   // ----------------------------------------------------
+  const sweepMssFvg = detectSweepMssFvg(data5m.candles, targetDir, nearestGann.price, atr_15m, price);
   const decimalPlaces = price < 1 ? 6 : 2;
-  const maxPullbackRatio = Math.max(0.003, Math.min(0.02, (settings.maxEntryProximityPercent || 0.8) / 100));
+
   let calculatedEntry = price;
-  if (targetDir === 'BUY') {
-    if (gannCalculations.nearestSupport && gannCalculations.nearestSupport.price < price && ((price - gannCalculations.nearestSupport.price) / price) <= maxPullbackRatio && ((price - gannCalculations.nearestSupport.price) / price) >= 0.0005) {
-      calculatedEntry = gannCalculations.nearestSupport.price;
-    } else if (expectedDynamic1x1 < price && ((price - expectedDynamic1x1) / price) <= maxPullbackRatio && ((price - expectedDynamic1x1) / price) >= 0.0005) {
-      calculatedEntry = expectedDynamic1x1;
-    }
-  } else if (targetDir === 'SELL') {
-    if (gannCalculations.nearestResistance && gannCalculations.nearestResistance.price > price && ((gannCalculations.nearestResistance.price - price) / price) <= maxPullbackRatio && ((gannCalculations.nearestResistance.price - price) / price) >= 0.0005) {
-      calculatedEntry = gannCalculations.nearestResistance.price;
-    } else if (expectedDynamic1x1 > price && ((expectedDynamic1x1 - price) / price) <= maxPullbackRatio && ((expectedDynamic1x1 - price) / price) >= 0.0005) {
-      calculatedEntry = expectedDynamic1x1;
-    }
+  let entryType: 'LIMIT' | 'MARKET' = 'MARKET';
+
+  // إذا تشكلت فجوة FVG بعد كسر الهيكل MSS، فالزناد المؤسسي هو أمر معلق عند الـ FVG retest
+  if (sweepMssFvg.hasFVG && sweepMssFvg.fvg.mid > 0 && Math.abs(sweepMssFvg.fvg.mid - price) / price <= 0.02) {
+    calculatedEntry = sweepMssFvg.recommendedEntry;
+    entryType = 'LIMIT';
+  } else {
+    calculatedEntry = price;
+    entryType = 'MARKET';
   }
 
   const effectiveEntryPrice = Number(calculatedEntry.toFixed(decimalPlaces));
   const entryDistPercent = Number((((effectiveEntryPrice - price) / price) * 100).toFixed(2));
-  const entryType: 'LIMIT' | 'MARKET' = Math.abs(entryDistPercent) >= 0.05 ? 'LIMIT' : 'MARKET';
 
   // ----------------------------------------------------
-  // 2. STRUCTURAL STOP LOSS CALCULATION (V41.00 Enterprise Protection Shield)
-  // Priority: 1. Wyckoff Extreme -> 2. Gann Anchor P0 -> 3. ATR Fallback
-  // ABSOLUTE RULE: BUY -> SL < Entry | SELL -> SL > Entry
+  // 2. DYNAMIC ATR STOP LOSS (SL = Gann / Sweep Level - n * ATR)
   // ----------------------------------------------------
   const isBtc = symbol.toUpperCase().includes('BTC');
-  // البيتكوين: حركة أنظف وهيكل مؤسسي مستقر (2.0x ATR وهامش 0.5%)
-  // العملات البديلة (Altcoins: ETH, SOL, XLM, SUI...): ذيول تصفية وتذبذب أعلى تتطلب وقفاً أوسع (2.4x ATR وهامش 1.2% لحمايتها من الخروج السريع في 3 دقائق)
   const isAdaptiveAltcoin = !isBtc && settings.enableAdaptiveAltcoinBuffer !== false;
-  const atrMultiplierForSL = isAdaptiveAltcoin ? 2.4 : 2.0;
-  const minRiskPctForSL = isAdaptiveAltcoin ? 0.012 : 0.005;
-  const antiHuntMultiplier = (settings.antiStopHuntMultiplier || 1.0) * (isAdaptiveAltcoin ? 1.5 : 1.0);
+  const nAtrMultiplier = isAdaptiveAltcoin ? 1.5 : 1.25;
 
-  const atrStopDistance = Math.max(atrMultiplierForSL * atr_15m, effectiveEntryPrice * minRiskPctForSL);
-  const structuralSL = calculateStructuralSL(
-    targetDir === 'BUY',
-    effectiveEntryPrice,
-    atrStopDistance,
-    atr_15m,
-    refPivotPrice,
-    wyckoffResult.extremePrice,
-    antiHuntMultiplier,
-    settings.enableAntiStopHuntBuffer !== false
-  );
+  // الربط بـ Sweep Level أو زاوية جان مطروحاً منها (n x ATR) لتوفير مرونة وتجنب ضرب الوقف
+  const anchorSlLevel = sweepMssFvg.hasSweep ? sweepMssFvg.sweepLevel : nearestGann.price;
+  let slCalculated = targetDir === 'BUY'
+    ? anchorSlLevel - (nAtrMultiplier * atr_15m)
+    : anchorSlLevel + (nAtrMultiplier * atr_15m);
 
-  let slCalculated = structuralSL.stopLoss;
-
-  // Strict Directional Safety Guard for Stop Loss (Anti-Stop-Hunt Buffer):
+  // Strict Directional Safety Guard for Stop Loss:
   const minSafeRiskDist = Math.max(
-    effectiveEntryPrice * (isAdaptiveAltcoin ? 0.024 : 0.008),
-    atr_15m * (isAdaptiveAltcoin ? 2.4 : 1.4)
+    effectiveEntryPrice * (isAdaptiveAltcoin ? 0.018 : 0.008),
+    atr_15m * (isAdaptiveAltcoin ? 1.8 : 1.2)
   );
   if (targetDir === 'BUY') {
     if (slCalculated >= effectiveEntryPrice - minSafeRiskDist) {
       slCalculated = effectiveEntryPrice - Math.max(
-        effectiveEntryPrice * (isAdaptiveAltcoin ? 0.026 : 0.010),
-        atr_15m * (isAdaptiveAltcoin ? 2.8 : 1.6)
+        effectiveEntryPrice * (isAdaptiveAltcoin ? 0.022 : 0.010),
+        atr_15m * (isAdaptiveAltcoin ? 2.0 : 1.4)
       );
     }
   } else {
     if (slCalculated <= effectiveEntryPrice + minSafeRiskDist) {
       slCalculated = effectiveEntryPrice + Math.max(
-        effectiveEntryPrice * (isAdaptiveAltcoin ? 0.026 : 0.010),
-        atr_15m * (isAdaptiveAltcoin ? 2.8 : 1.6)
+        effectiveEntryPrice * (isAdaptiveAltcoin ? 0.022 : 0.010),
+        atr_15m * (isAdaptiveAltcoin ? 2.0 : 1.4)
       );
     }
   }
 
   // سقف الوقف الأقصى لحماية الصفقات بالرافعة المالية (Max SL Cap Protection)
-  // يمنع تجاوز الوقف نسبة 2.8% للعملات البديلة (أو 1.5% للبيتكوين) لتفادي الخسائر الكبيرة عند رافعة 5x
   if (settings.enableMaxSlCap !== false) {
     const maxAllowedDistPct = settings.maxSlDistancePercent && settings.maxSlDistancePercent > 0
       ? settings.maxSlDistancePercent
@@ -2046,8 +2043,8 @@ export async function analyzeIntradayMarketData(symbol: string): Promise<Analysi
     maxScore: 10,
     passed: true,
     timeframe: '15M',
-    description: `نموذج الخروج الرباعي لجان ووايكوف (${structuralSL.description}): إغلاق 25% عند كل هدف مع حجز الأرباح وتأمين الصفقة، والهدف النهائي بسقف 1:2 R:R مستند إلى ${targetAngleName}`,
-    details: `SL (${structuralSL.type}): $${slCalculated.toFixed(price < 1 ? 6 : 2)} | أهداف الخروج: TP1 ($${tp1Calculated}), TP2 ($${tp2Calculated}), TP3 ($${tp3Calculated}), TP4 ($${tp4Calculated})`,
+    description: `نموذج الخروج الرباعي لجان ووايكوف (وقف ديناميكي مرن ATR): إغلاق 25% عند كل هدف مع حجز الأرباح وتأمين الصفقة، والهدف النهائي بسقف 1:2 R:R مستند إلى ${targetAngleName}`,
+    details: `SL (DYNAMIC_ATR_SWEEP): $${slCalculated.toFixed(price < 1 ? 6 : 2)} | أهداف الخروج: TP1 ($${tp1Calculated}), TP2 ($${tp2Calculated}), TP3 ($${tp3Calculated}), TP4 ($${tp4Calculated})`,
   };
 
   const gannSlopeData: GannSlopeData = {
@@ -2118,7 +2115,10 @@ export async function analyzeIntradayMarketData(symbol: string): Promise<Analysi
     riskRewardRatio: rrrItem,
     items: [macroTrendItem, gannPriceItem, gannSlopeItem, momentumItem, volumeItem],
     wyckoffData: wyckoffResult,
-    structuralSLType: structuralSL.type,
+    structuralSLType: 'DYNAMIC_ATR_SWEEP',
+    volumeProfile,
+    sessionVwap,
+    sweepMssFvg,
     gann: gannGeometryData,
     gannSlopeData,
     reversalBarData,
@@ -2497,7 +2497,12 @@ export async function analyzeIntradayMarketData(symbol: string): Promise<Analysi
       sopScore: passedGatesCount,
       wyckoffPattern: wyckoffResult.patternName,
       wyckoffData: wyckoffResult,
-      structuralSLType: structuralSL.type,
+      structuralSLType: 'DYNAMIC_ATR_SWEEP',
+      triggerType: 'SWEEP_MSS_FVG',
+      dynamicAtrStopLoss: Number(slCalculated.toFixed(decimalPlaces)),
+      volumeProfile,
+      sessionVwap,
+      sweepMssFvg,
       quadScaleOut: {
         tp1_0_5r: Number(tp1Calculated.toFixed(decimalPlaces)),
         tp2_1_0r: Number(tp2Calculated.toFixed(decimalPlaces)),
@@ -2610,6 +2615,9 @@ export async function analyzeIntradayMarketData(symbol: string): Promise<Analysi
     sessionInfo: timeGuard.sessionInfo,
     intradayProtection,
     tradingMode: 'INTRADAY',
+    volumeProfile,
+    sessionVwap,
+    sweepMssFvg,
     indicators: {
       price,
       daily_macro_bias: dailyMacroBias.bias,
@@ -2845,6 +2853,11 @@ export async function analyzeScalpMarketData(symbol: string): Promise<AnalysisRe
   const sq9ExactLevels = calculateSq9Exact(refPivotPrice);
   const gannCalculations = calculateSquareOfNineLevels(refPivotPrice, price);
   const nearestGann = targetDir === 'BUY' ? gannCalculations.nearestSupport : gannCalculations.nearestResistance;
+
+  // حساب بروفايل الحجم والـ VWAP ونموذج كنس السيولة للمضاربة
+  const sessionVwap = calculateSessionVwap(data15m.candles, price);
+  const volumeProfile = calculateVolumeProfile(data15m.candles, price, nearestGann.price);
+  const sweepMssFvg = detectSweepMssFvg(data1m.candles, targetDir, nearestGann.price, atr_1m, price);
 
   const gannPriceItem: ConfluenceItem = {
     category: 'PRICE_LEVEL',
@@ -3160,6 +3173,10 @@ export async function analyzeScalpMarketData(symbol: string): Promise<AnalysisRe
     volumeConfirmation: volumeItem,
     riskRewardRatio: rrrItem,
     items: [macroTrendItem, gannPriceItem, gannSlopeItem, momentumItem, volumeItem],
+    structuralSLType: 'DYNAMIC_ATR_SWEEP',
+    volumeProfile,
+    sessionVwap,
+    sweepMssFvg,
     gann: gannGeometryData,
     gannSlopeData,
     reversalBarData,
@@ -3373,6 +3390,12 @@ export async function analyzeScalpMarketData(symbol: string): Promise<AnalysisRe
       suggestedLotUnits: Number(lotUnits.toFixed(4)),
       suggestedPositionUsdt: Number(positionSizeUsdt.toFixed(2)),
       maxRiskUsdt: Number(maxRiskUsdt.toFixed(2)),
+      structuralSLType: 'DYNAMIC_ATR_SWEEP',
+      triggerType: 'SWEEP_MSS_FVG',
+      dynamicAtrStopLoss: Number(slCalculated.toFixed(decimalPlaces)),
+      volumeProfile,
+      sessionVwap,
+      sweepMssFvg,
       swingHigh: swings15M.swingHigh,
       swingLow: swings15M.swingLow,
       quadScaleOut: {
@@ -3405,6 +3428,9 @@ export async function analyzeScalpMarketData(symbol: string): Promise<AnalysisRe
     timeGuard,
     sessionInfo: timeGuard.sessionInfo,
     tradingMode: 'SCALP',
+    volumeProfile,
+    sessionVwap,
+    sweepMssFvg,
     indicators: {
       price,
       daily_macro_bias: dailyMacroBias.bias,

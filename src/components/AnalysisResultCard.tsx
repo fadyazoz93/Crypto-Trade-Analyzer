@@ -51,19 +51,20 @@ export const AnalysisResultCard: React.FC<AnalysisResultCardProps> = ({ result, 
     if (trade_setup && !isNoTrade) {
       text = `${isBuy ? '🟢 إشارة شراء مؤكدة' : '🔴 إشارة بيع مؤكدة'} | #${selectedSymbol}
 ════════════════════
-📌 نوع الأمر: ${trade_setup.entry_type === 'LIMIT' ? 'أمر معلق (Limit) عند التصحيح' : 'دخول فوري (Market)'}
+📌 زناد الدخول المؤسسي: ${trade_setup.triggerType === 'SWEEP_MSS_FVG' ? 'نموذج كنس السيولة (Sweep + MSS + FVG)' : (trade_setup.entry_type === 'LIMIT' ? 'أمر معلق عند إعادة اختبار FVG' : 'تنفيذ فوري مباشر')}
+▫️ سعر الدخول: $${trade_setup.entry_price}
 
 💰 مستويات الصفقة:
-▫️ سعر الدخول: $${trade_setup.entry_price}
-▫️ الهدف الأول (TP1): $${trade_setup.take_profit_1} (+${trade_setup.tp1Percent}%) [حجز 50% أرباح]
-▫️ الهدف الثاني (TP2): $${trade_setup.take_profit_2 || trade_setup.take_profit} (+${trade_setup.tp2Percent || trade_setup.tpPercent}%) [الهدف النهائي]
-▫️ وقف الخسارة (SL): $${trade_setup.stop_loss} (${trade_setup.stopLossPercent}%-)
+▫️ الهدف الأول (TP1): $${trade_setup.take_profit_1} (+${trade_setup.tp1Percent}%) [حجز 25% أرباح]
+▫️ الهدف الثاني (TP2): $${trade_setup.take_profit_2 || trade_setup.take_profit} (+${trade_setup.tp2Percent || trade_setup.tpPercent}%) [هدف 1:1 R]
+▫️ الهدف النهائي (TP4): $${trade_setup.take_profit_4 || trade_setup.take_profit} (+${trade_setup.tp4Percent || trade_setup.tpPercent}%) [سقف جان 1:2 R]
+▫️ وقف الخسارة الديناميكي (Dynamic ATR SL): $${trade_setup.stop_loss} (${trade_setup.stopLossPercent}%-) [مرن حسب تقلب السوق لمنع الانزلاق]
 
-⚙️ أوامر الحماية والتأمين:
-▫️ تأمين الدخول (Break-Even): انقل الوقف إلى $${trade_setup.breakEvenPrice || trade_setup.entry_price} عند وصول السعر إلى $${trade_setup.beTriggerPrice || trade_setup.target50PercentPrice}
-▫️ الوقف المتحرك (Trailing Stop): نسبة ${trade_setup.trailingCallbackPercent || (trade_setup.stopLossPercent ? (trade_setup.stopLossPercent * 0.55).toFixed(2) : 0.85)}% تفعل عند TP1
+📊 المنظومة المؤسسية المرافقة:
+▫️ بروفايل الحجم POC: $${result.volumeProfile?.pocPrice || '—'} (تأكيد حجمي مباشر بديل المؤشرات المتأخرة)
+▫️ الـ VWAP المؤسسي: $${result.sessionVwap?.vwap || '—'} (${result.sessionVwap?.isAboveVwap ? 'تدفق شرائي ↗️' : 'تدفق بيعي ↘️'})
+▫️ تأمين الدخول (Break-Even): نقل الوقف إلى $${trade_setup.breakEvenPrice || trade_setup.entry_price} عند وصول السعر إلى $${trade_setup.beTriggerPrice || trade_setup.target50PercentPrice}
 
-📊 السعر اللحظي: $${indicators.price}
 ════════════════════
 ⚠️ إدارة المخاطر: مخاطرة 1% كحد أقصى (${trade_setup.suggestedPositionUsdt ? `$${trade_setup.suggestedPositionUsdt}` : '1%'})`;
     } else {
@@ -71,6 +72,8 @@ export const AnalysisResultCard: React.FC<AnalysisResultCardProps> = ({ result, 
 السعر اللحظي: $${indicators.price}
 الحالة العامة: ⚪ انتظار (NO_TRADE)
 200 EMA (4H): $${indicators.ema200_4h.toFixed(2)}
+Volume Profile POC: $${result.volumeProfile?.pocPrice || '—'}
+Session VWAP: $${result.sessionVwap?.vwap || '—'}
 مؤشر RSI (5M): ${indicators.rsi_5m.toFixed(1)}
 درجة التوافق: ${confluenceMatrix ? `${confluenceMatrix.totalScore}/100` : '—'}
 التوقيت: ${new Date().toLocaleTimeString('ar-EG')}`;
@@ -180,6 +183,25 @@ export const AnalysisResultCard: React.FC<AnalysisResultCardProps> = ({ result, 
                 {dailyMacroBias.enabled
                   ? `الاتجاه اليومي 1D: ${dailyMacroBias.isMacroBullish ? 'صاعد (شراء فقط)' : 'هابط (بيع فقط)'}`
                   : 'الاتجاه اليومي: معطل'}
+              </span>
+            )}
+
+            {/* Volume Profile POC Pill */}
+            {result.volumeProfile && (
+              <span className="text-[11px] sm:text-xs bg-violet-950/80 text-violet-300 border border-violet-700/80 px-2 py-1 rounded-lg font-mono font-bold flex items-center gap-1" title="بروفايل الحجم - أعلى حجم تداول (POC)">
+                <span className="text-violet-400 font-sans font-bold">POC:</span>
+                ${result.volumeProfile.pocPrice.toFixed(indicators.price < 1 ? 4 : 2)}
+              </span>
+            )}
+
+            {/* Session VWAP Pill */}
+            {result.sessionVwap && (
+              <span className={`text-[11px] sm:text-xs px-2 py-1 rounded-lg font-mono font-bold border flex items-center gap-1 ${
+                result.sessionVwap.isAboveVwap ? 'bg-cyan-950/80 text-cyan-300 border-cyan-700/80' : 'bg-rose-950/80 text-rose-300 border-rose-700/80'
+              }`} title="الـ VWAP المؤسسي للجلسة اليومية">
+                <span className="font-sans font-bold">VWAP:</span>
+                ${result.sessionVwap.vwap.toFixed(indicators.price < 1 ? 4 : 2)}
+                <span className="text-[9px]">{result.sessionVwap.isAboveVwap ? '↗️' : '↘️'}</span>
               </span>
             )}
 
@@ -482,27 +504,29 @@ export const AnalysisResultCard: React.FC<AnalysisResultCardProps> = ({ result, 
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2.5 sm:gap-3">
             <div className="bg-slate-950 p-3 sm:p-4 rounded-xl border border-slate-800 text-center space-y-0.5">
               <div className="text-[11px] sm:text-xs text-slate-400 font-bold flex items-center justify-center gap-1">
-                <span>سعر الدخول المقترح (Entry)</span>
-                {trade_setup.entry_type === 'LIMIT' && (
+                <span>زناد الدخول المؤسسي (Trigger)</span>
+                {trade_setup.triggerType === 'SWEEP_MSS_FVG' ? (
+                  <span className="text-[9px] bg-emerald-500/20 text-emerald-300 px-1 rounded font-bold">Sweep+MSS ⚡</span>
+                ) : trade_setup.entry_type === 'LIMIT' ? (
                   <span className="text-[9px] bg-amber-500/20 text-amber-300 px-1 rounded font-bold">معلق ⏳</span>
-                )}
+                ) : null}
               </div>
               <div className="font-mono text-base sm:text-lg font-extrabold text-slate-100">${trade_setup.entry_price}</div>
               <div className="text-[10px] text-slate-400 font-mono">
-                {trade_setup.entry_type === 'LIMIT' && trade_setup.entryDistancePercent !== undefined
-                  ? `${Number(trade_setup.entryDistancePercent) > 0 ? `+${trade_setup.entryDistancePercent}%` : `${trade_setup.entryDistancePercent}%`} عن الحالي`
-                  : 'تنفيذ فوري مباشر'}
+                {trade_setup.entry_type === 'LIMIT'
+                  ? 'إعادة اختبار FVG (بديل الليمت الأعمى)'
+                  : 'تنفيذ فوري مع كسر الهيكل MSS'}
               </div>
             </div>
 
             <div className="bg-slate-950 p-3 sm:p-4 rounded-xl border border-rose-900/40 text-center space-y-0.5">
               <div className="text-[11px] sm:text-xs text-rose-400 font-bold flex items-center justify-center gap-1">
                 <ShieldAlert className="w-3 h-3 sm:w-3.5 sm:h-3.5" />
-                <span>وقف الخسارة الهيكلي (SL)</span>
+                <span>الوقف الديناميكي (Dynamic ATR SL)</span>
               </div>
               <div className="font-mono text-base sm:text-lg font-extrabold text-rose-400">${trade_setup.stop_loss}</div>
               <div className="text-[10px] text-rose-300 font-mono">
-                ({trade_setup.stopLossPercent}% مخاطرة | {trade_setup.structuralSLType === 'WYCKOFF_EXTREME' ? 'قاع وايكوف' : trade_setup.structuralSLType === 'GANN_SWING_ANCHOR' ? 'ارتكاز جان P0' : 'هيكلي ATR'})
+                ({trade_setup.stopLossPercent}% مخاطرة | وقف تكيفي مرن بالـ ATR)
               </div>
             </div>
 
