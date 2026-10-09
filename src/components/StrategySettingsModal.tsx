@@ -5,6 +5,7 @@ import { getPaperPortfolio, fetchPaperPortfolioFromTurso } from '../utils/paperT
 import { Sliders, Save, CheckCircle2, ShieldCheck, Zap, BellRing, ShieldAlert, Award, Clock, DollarSign, RefreshCw, X, Send, Database, UploadCloud, DownloadCloud, Trash2 } from 'lucide-react';
 import { testTelegramConnection } from '../utils/telegramNotifications';
 import { signalNotificationManager } from '../utils/tradeSignalNotifier';
+import { slippageProtectionManager } from '../utils/slippageProtectionManager';
 
 interface StrategySettingsModalProps {
   isOpen: boolean;
@@ -921,6 +922,108 @@ export const StrategySettingsModal: React.FC<StrategySettingsModalProps> = ({ is
               </div>
               <p className="text-[10px] text-slate-400 leading-relaxed">
                 يمنع تكرار تنبيه نفس الصفقة لنفس العملة في إطار زمني أقل من <strong>{settings.signalCooldownMinutes ?? 30} دقيقة</strong> لتقليل الإزعاج وتفادي التكرار عند تذبذب الشموع.
+              </p>
+            </div>
+
+            {/* 14. Slippage Circuit Breaker & 30-Minute Cooldown Guard */}
+            <div className="bg-slate-950/80 border border-amber-500/40 rounded-xl p-3 space-y-2.5">
+              <div className="flex items-center justify-between">
+                <label className="font-bold text-amber-300 text-xs flex items-center gap-1.5 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={settings.enableSlippageCooldownGuard ?? true}
+                    onChange={(e) => setSettings({ ...settings, enableSlippageCooldownGuard: e.target.checked })}
+                    className="w-4 h-4 rounded text-amber-500 focus:ring-amber-500 bg-slate-900 border-slate-700 cursor-pointer"
+                  />
+                  <span>قاطع حماية الانزلاقات ومهلة التبريد 30 دقيقة (Slippage Freeze):</span>
+                </label>
+                <div className="flex items-center gap-2">
+                  <input
+                    type="number"
+                    min="10"
+                    max="120"
+                    step="5"
+                    value={settings.slippageCooldownMinutes ?? 30}
+                    onChange={(e) => setSettings({ ...settings, slippageCooldownMinutes: Math.max(10, Number(e.target.value)) })}
+                    className="w-20 bg-slate-900 border border-slate-700 p-1.5 rounded-lg text-amber-300 font-mono text-center font-bold text-xs"
+                    disabled={settings.enableSlippageCooldownGuard === false}
+                  />
+                  <span className="text-slate-400 text-xs font-bold">دقيقة تبريد</span>
+                </div>
+              </div>
+              <p className="text-[10px] text-slate-300 leading-relaxed">
+                يجمّد إرسال الإشارات تلقائياً أثناء حدوث أي انزلاق سعري شاذ (Flash Dump أو شمعة خبر حادة) ولمدة <strong>{settings.slippageCooldownMinutes ?? 30} دقيقة</strong> بعد انتهائها لإتاحة الوقت لامتصاص الصدمة واستقرار دفتر الأوامر.
+              </p>
+              
+              <div className="pt-1 border-t border-slate-800 flex items-center justify-between">
+                <label className="text-[11px] text-slate-300 font-bold flex items-center gap-1.5 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={settings.preventShortingFlashCrashBottom ?? true}
+                    onChange={(e) => setSettings({ ...settings, preventShortingFlashCrashBottom: e.target.checked })}
+                    className="w-3.5 h-3.5 rounded text-amber-500 focus:ring-amber-500 bg-slate-900 border-slate-700 cursor-pointer"
+                  />
+                  <span>حظر صفقات البيع المباشرة في قاع الانهيار (يتطلب ارتداداً لمناطق Premium / FVG)</span>
+                </label>
+                <button
+                  type="button"
+                  onClick={() => {
+                    slippageProtectionManager.clearAll();
+                    alert('تم تصفير حوادث الانزلاقات وفك التجميد يدوياً بنجاح.');
+                  }}
+                  className="px-2 py-1 bg-amber-950/60 hover:bg-amber-900/80 text-amber-300 text-[10px] font-bold rounded border border-amber-700/60 transition cursor-pointer"
+                >
+                  فك التجميد يدوياً 🔓
+                </button>
+              </div>
+            </div>
+
+            {/* 15. Session Timing & Holding Duration Precision Guards */}
+            <div className="bg-slate-950/80 border border-indigo-500/40 rounded-xl p-3 space-y-2.5">
+              <div className="flex items-center justify-between">
+                <label className="font-bold text-indigo-300 text-xs flex items-center gap-1.5 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={settings.enableLondonLunchLullGuard ?? true}
+                    onChange={(e) => setSettings({ ...settings, enableLondonLunchLullGuard: e.target.checked })}
+                    className="w-4 h-4 rounded text-indigo-500 focus:ring-indigo-500 bg-slate-900 border-slate-700 cursor-pointer"
+                  />
+                  <span>فلتر ركود السيولة الأوروبية الأمريكية (London Lunch 11:30 - 12:45 UTC):</span>
+                </label>
+                <span className="text-[10px] bg-indigo-950 text-indigo-300 border border-indigo-800 px-2 py-0.5 rounded font-bold">
+                  حظر العملات البديلة 🇬🇧
+                </span>
+              </div>
+              <p className="text-[10px] text-slate-400 leading-relaxed">
+                يمنع التورط في التذبذب العشوائي الخادع على العملات البديلة في فترة فراغ السيولة بين ذروة لندن وبداية افتتاح نيويورك.
+              </p>
+
+              <div className="pt-2 border-t border-slate-800 flex items-center justify-between">
+                <label className="font-bold text-sky-300 text-xs flex items-center gap-1.5 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={settings.enableTimeBasedStopLoss ?? true}
+                    onChange={(e) => setSettings({ ...settings, enableTimeBasedStopLoss: e.target.checked })}
+                    className="w-4 h-4 rounded text-sky-500 focus:ring-sky-500 bg-slate-900 border-slate-700 cursor-pointer"
+                  />
+                  <span>الوقف الزمني التلقائي (Time-Based Stop Loss):</span>
+                </label>
+                <div className="flex items-center gap-2">
+                  <input
+                    type="number"
+                    min="1.0"
+                    max="8.0"
+                    step="0.5"
+                    value={settings.maxIntradayHoldingHours ?? 3.5}
+                    onChange={(e) => setSettings({ ...settings, maxIntradayHoldingHours: Math.max(1.0, Number(e.target.value)) })}
+                    className="w-20 bg-slate-900 border border-slate-700 p-1.5 rounded-lg text-sky-300 font-mono text-center font-bold text-xs"
+                    disabled={settings.enableTimeBasedStopLoss === false}
+                  />
+                  <span className="text-slate-400 text-xs font-bold">ساعات كحد أقصى</span>
+                </div>
+              </div>
+              <p className="text-[10px] text-slate-400 leading-relaxed">
+                يرسل تنبيهاً فورياً ويغلق الصفقة إذا تجاوزت <strong>{settings.maxIntradayHoldingHours ?? 3.5} ساعة</strong> دون الوصول للهدف لحماية الحساب من تصفيات نهاية الجلسة.
               </p>
             </div>
 

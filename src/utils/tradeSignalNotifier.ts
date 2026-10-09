@@ -5,6 +5,7 @@
  */
 
 import { getStrategySettings } from './settingsStore';
+import { slippageProtectionManager } from './slippageProtectionManager';
 
 export interface NotifiedSignalRecord {
   symbol: string;
@@ -146,6 +147,13 @@ class TradeSignalNotificationManager {
     decision: 'BUY' | 'SELL',
     channel?: 'BROWSER' | 'TELEGRAM' | 'AUDIO'
   ): boolean {
+    // 0. قاطع حماية الانزلاقات السعرية ومهلة التبريد 30 دقيقة:
+    // إذا كان هناك انزلاق سعري شاذ أو فترة تبريد 30 دقيقة نشطة لامتصاص التقلب، نمنع إرسال أي إشعار نهائياً
+    const slippageCheck = slippageProtectionManager.isSignalBlocked(symbol);
+    if (slippageCheck.blocked) {
+      return true; // حجب إرسال الإشعار لتفادي الانزلاق وتجميد الإشارات
+    }
+
     const key = this.getKey(symbol, decision);
     const existing = this.inMemoryRegistry.get(key);
 

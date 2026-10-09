@@ -47,11 +47,12 @@ export interface VirtualTrade {
   riskUsdt?: number;
   hardRiskCapApplied?: boolean;
   maxDeviationPoints?: number;
-  status: 'OPEN' | 'PENDING_ENTRY' | 'CLOSED_TP1' | 'CLOSED_TP2' | 'CLOSED_SL' | 'CLOSED_TRAILING' | 'CLOSED_BREAKEVEN' | 'CLOSED_MANUAL' | 'CLOSED_SCALE_OUT_RUNNER' | 'CLOSED_FRIDAY_GAP_GUARD' | 'CLOSED_CANCELLED';
+  status: 'OPEN' | 'PENDING_ENTRY' | 'CLOSED_TP1' | 'CLOSED_TP2' | 'CLOSED_SL' | 'CLOSED_TRAILING' | 'CLOSED_BREAKEVEN' | 'CLOSED_MANUAL' | 'CLOSED_SCALE_OUT_RUNNER' | 'CLOSED_FRIDAY_GAP_GUARD' | 'CLOSED_TIME_STOP' | 'CLOSED_CANCELLED';
   entryTime: string;
   createdTime?: string;
   filledTime?: string;
   closeTime?: string;
+  openedTimestampMs?: number;
   exitPrice?: number;
   pnlUsdt: number; // unrealized or realized on current portion
   pnlPercent: number;
@@ -490,6 +491,7 @@ export function openVirtualTrade(
     status: isPending ? 'PENDING_ENTRY' : 'OPEN',
     entryTime: isPending ? '⏳ بانتظار السعر' : new Date().toLocaleTimeString('ar-EG'),
     createdTime: new Date().toLocaleTimeString('ar-EG'),
+    openedTimestampMs: isPending ? undefined : Date.now(),
     pnlUsdt: 0,
     pnlPercent: 0,
     sopScore,
@@ -585,6 +587,7 @@ export function updateTradeWithLiveTick(
           status: 'OPEN',
           entryTime: new Date().toLocaleTimeString('ar-EG'),
           filledTime: new Date().toLocaleTimeString('ar-EG'),
+          openedTimestampMs: Date.now(),
           currentPrice: livePrice,
           highestPriceSeen: livePrice,
           lowestPriceSeen: livePrice,
@@ -774,9 +777,30 @@ export function updateTradeWithLiveTick(
     const tickHour = tickNow.getUTCHours();
     const isTradeForexOrMetal = !trade.symbol.toUpperCase().endsWith('USDT') || trade.symbol.toUpperCase().includes('XAU') || trade.symbol.toUpperCase().includes('XAG') || trade.symbol.toUpperCase().includes('GOLD') || trade.symbol.toUpperCase().includes('SILVER');
 
+    // B. Time-Based Stop Loss Guard (الوقف الزمني بعد تجاوز أقصى مهلة احتفاظ إنتراداي 3.5 ساعات)
+    const openedTimeMs = trade.openedTimestampMs || parseInt(trade.id.split('-')[1] || '0', 10);
+    const holdingMs = openedTimeMs > 0 ? Date.now() - openedTimeMs : 0;
+    const maxHoldingMs = (settings.maxIntradayHoldingHours || 3.5) * 60 * 60 * 1000;
+    const isHoldingExpired = settings.enableTimeBasedStopLoss !== false && holdingMs >= maxHoldingMs;
+
     if (settings.enableFridayWeekendGapGuard && isTradeForexOrMetal && ((tickDay === 5 && tickHour >= (settings.fridayCloseHourUtc || 20)) || tickDay === 6 || (tickDay === 0 && tickHour < 22))) {
       hitStatus = 'CLOSED_FRIDAY_GAP_GUARD';
       exitPrice = livePrice;
+    } else if (isHoldingExpired && !isScaleOutDone) {
+      hitStatus = 'CLOSED_TIME_STOP';
+      exitPrice = livePrice;
+
+      // إرسال تنبيه الأمان الزمني المستقل لتليجرام
+      sendTelegramSecurityUpdate({
+        symbol: trade.symbol,
+        decision: trade.type,
+        currentPrice: livePrice,
+        entryPrice: trade.entryPrice,
+        oldStopLoss: trade.stopLoss,
+        newStopLoss: livePrice,
+        stage: 'TIME_BASED_EXIT',
+        targetHitName: `تجاوز مهلة الاحتفاظ (${(holdingMs / (60 * 60 * 1000)).toFixed(1)} ساعة)`,
+      }).catch(() => {});
     } else if (isBuy) {
       if (livePrice >= trade.takeProfit2) {
         hitStatus = 'CLOSED_TP2';

@@ -129,6 +129,16 @@ export interface StrategySettings {
   maxSlDistancePercent: number; // default: 2.2% (at 5x leverage = max 11% loss on margin)
   enableEarlyBreakevenAlert: boolean; // default: true (advises moving SL to entry at 0.5R)
   enableBtc15mIntradayGuard: boolean; // default: true (checks BTC 15M sharp drop)
+
+  // 14. Slippage Circuit Breaker & 30-Minute Cooldown Guard
+  enableSlippageCooldownGuard: boolean; // default: true (freezes signals during slippage and 30m after)
+  slippageCooldownMinutes: number; // default: 30 minutes cooldown
+  preventShortingFlashCrashBottom: boolean; // default: true (blocks market shorting after dumps without a retracement to premium zone)
+
+  // 15. Session Timing & Holding Duration Precision Guards
+  enableLondonLunchLullGuard: boolean; // default: true (blocks altcoins in 11:30 - 12:45 UTC European dead-zone)
+  enableTimeBasedStopLoss: boolean; // default: true (alerts / exits if trade exceeds maxHoldingHours without hitting TP)
+  maxIntradayHoldingHours: number; // default: 3.5 hours
 }
 
 const SETTINGS_KEY = 'crypto_analyzer_strategy_settings_v41';
@@ -260,6 +270,12 @@ export const DEFAULT_SETTINGS: StrategySettings = {
   maxSlDistancePercent: 2.2,
   enableEarlyBreakevenAlert: true,
   enableBtc15mIntradayGuard: true,
+  enableSlippageCooldownGuard: true,
+  slippageCooldownMinutes: 30,
+  preventShortingFlashCrashBottom: true,
+  enableLondonLunchLullGuard: true,
+  enableTimeBasedStopLoss: true,
+  maxIntradayHoldingHours: 3.5,
 };
 
 let serverSettings: StrategySettings = {
@@ -274,6 +290,12 @@ let serverSettings: StrategySettings = {
   maxSlDistancePercent: 2.2,
   enableEarlyBreakevenAlert: true,
   enableBtc15mIntradayGuard: true,
+  enableSlippageCooldownGuard: true,
+  slippageCooldownMinutes: 30,
+  preventShortingFlashCrashBottom: true,
+  enableLondonLunchLullGuard: true,
+  enableTimeBasedStopLoss: true,
+  maxIntradayHoldingHours: 3.5,
 };
 
 export function setServerStrategySettings(updates: Partial<StrategySettings>): void {

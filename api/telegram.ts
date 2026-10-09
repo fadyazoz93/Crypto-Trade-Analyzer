@@ -543,7 +543,7 @@ export interface TrailingStopUpdatePayload {
   newStopLoss: number;
   tp1Price?: number;
   targetHitName?: string; // e.g. "وصول السعر إلى 50% من مشوار الهدف" أو "1.5 ATR"
-  stage: 'BREAKEVEN' | 'LOCK_PROFIT_0_5R' | 'TRAILING_LOCK' | 'TRAILING_50_LOCK';
+  stage: 'BREAKEVEN' | 'LOCK_PROFIT_0_5R' | 'TRAILING_LOCK' | 'TRAILING_50_LOCK' | 'TIME_BASED_EXIT';
   reason?: string;
   binancePrice?: number;
 }
@@ -788,7 +788,23 @@ export async function sendTelegramTrailingStopUpdate(payload: TrailingStopUpdate
     const statusBadge = isBuy ? `🟢 شراء (LONG)` : `🔴 بيع (SHORT)`;
 
     let message = '';
-    if (isLockProfit) {
+    if (stage === 'TIME_BASED_EXIT') {
+      message = `⏳ <b>تنبيه الأمان الزمني | استنفاد مهلة الزخم اللحظي (Time-Based Stop)</b>
+════════════════════
+🪙 <b>العملة:</b> <code>${normalizedSymbol}</code> | ${statusBadge}
+
+💰 <b>مستويات الأسعار:</b>
+▫️ <b>سعر الدخول:</b> <code>${formattedEntry}</code>
+▫️ <b>السعر اللحظي:</b> <code>${formattedCurPrice}</code>
+▫️ <b>بينانس الموازي:</b> <code>${parallelBinanceVal}</code>
+
+⚠️ <b>سبب التنبيه:</b>
+الصفقة استمرت لأكثر من <b>3.5 ساعات</b> دون كسر قمة/قاع جديدة ودون الوصول للهدف الأول، مما يشير إلى ضعف الزخم واستنزاف سيولة الجلسة.
+
+⚙️ <b>الإجراء الموصى به في المنصة (Binance / OKX):</b>
+1️⃣ يُنصح بإغلاق الصفقة يدوياً بسعر السوق أو نقل وقف الخسارة فوراً إلى سعر الدخول (Breakeven): <code>${formattedEntry}</code>.
+2️⃣ تحرير الهامش لتفادي تقلبات نهاية الجلسة وتوفير السيولة لفرصة مؤسسية جديدة.`;
+    } else if (isLockProfit) {
       message = `${actionHeader}
 ════════════════════
 🪙 <b>العملة:</b> <code>${normalizedSymbol}</code> | ${statusBadge}
@@ -924,7 +940,7 @@ export default async function telegramHandler(req: VercelRequest, res: VercelRes
   if (action === 'send_signal' || req.method === 'POST') {
     const payload = req.body || {};
     // If payload contains trailing stop stage, route to sendTelegramTrailingStopUpdate
-    if (payload.stage === 'BREAKEVEN' || payload.stage === 'LOCK_PROFIT_0_5R' || payload.stage === 'TRAILING_LOCK' || payload.stage === 'TRAILING_50_LOCK') {
+    if (payload.stage === 'BREAKEVEN' || payload.stage === 'LOCK_PROFIT_0_5R' || payload.stage === 'TRAILING_LOCK' || payload.stage === 'TRAILING_50_LOCK' || payload.stage === 'TIME_BASED_EXIT') {
       const resPayload = await sendTelegramTrailingStopUpdate(payload);
       return res.status(resPayload.success ? 200 : 500).json(resPayload);
     }

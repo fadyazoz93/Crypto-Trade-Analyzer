@@ -155,7 +155,7 @@ export interface TelegramSecurityUpdateData {
   oldStopLoss: number;
   newStopLoss: number;
   tp1Price?: number;
-  stage: 'BREAKEVEN' | 'LOCK_PROFIT_0_5R' | 'TRAILING_LOCK' | 'TRAILING_50_LOCK';
+  stage: 'BREAKEVEN' | 'LOCK_PROFIT_0_5R' | 'TRAILING_LOCK' | 'TRAILING_50_LOCK' | 'TIME_BASED_EXIT';
   targetHitName?: string;
   reason?: string;
   binancePrice?: number;

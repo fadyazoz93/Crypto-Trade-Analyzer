@@ -1,5 +1,6 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { IntradayProtectionShield, TradeSetup } from '../types';
+import { slippageProtectionManager, SlippageProtectionStatus } from '../utils/slippageProtectionManager';
 import { 
   ShieldCheck, 
   Layers, 
@@ -16,7 +17,9 @@ import {
   ArrowDownRight,
   Shield,
   Sliders,
-  DollarSign
+  DollarSign,
+  PauseCircle,
+  RefreshCw
 } from 'lucide-react';
 
 interface IntradayProtectionCardProps {
@@ -36,6 +39,26 @@ export const IntradayProtectionCard: React.FC<IntradayProtectionCardProps> = ({
 
   const { slippageGuard, reversalGuard, executionMatrix } = protection;
   const isTier1 = slippageGuard.tier1LiquidityFocus.isTier1Symbol;
+
+  const [slippageState, setSlippageState] = useState<SlippageProtectionStatus>(() => {
+    if (slippageGuard.slippageCooldownGuard) {
+      return slippageGuard.slippageCooldownGuard;
+    }
+    return slippageProtectionManager.getStatus(symbol, price);
+  });
+
+  useEffect(() => {
+    const update = () => {
+      setSlippageState(slippageProtectionManager.getStatus(symbol, price));
+    };
+    update();
+    const timer = setInterval(update, 1000);
+    window.addEventListener('slippage-protection-updated', update);
+    return () => {
+      clearInterval(timer);
+      window.removeEventListener('slippage-protection-updated', update);
+    };
+  }, [symbol, price]);
 
   return (
     <div className="bg-slate-900/90 border border-emerald-500/30 rounded-2xl p-4 sm:p-5 shadow-xl space-y-4" dir="rtl">
@@ -72,6 +95,38 @@ export const IntradayProtectionCard: React.FC<IntradayProtectionCardProps> = ({
           </span>
         </div>
       </div>
+
+      {/* Slippage Circuit Breaker Active Warning Banner */}
+      {slippageState.signalsPaused && (
+        <div className="bg-amber-950/80 border border-amber-500/60 rounded-xl p-3.5 flex items-start gap-3 text-amber-200 shadow-lg shadow-amber-950/40">
+          <div className="p-2 bg-amber-500/20 text-amber-400 rounded-lg shrink-0 mt-0.5">
+            <PauseCircle className="w-5 h-5 animate-pulse" />
+          </div>
+          <div className="space-y-1.5 text-xs flex-1">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <span className="font-black text-amber-300 text-sm flex items-center gap-1.5">
+                <span>قاطع حماية الانزلاقات السعرية نشط (Slippage Freeze)</span>
+              </span>
+              <span className="bg-amber-500/20 text-amber-200 px-2.5 py-1 rounded-lg font-mono font-black text-xs border border-amber-500/40 flex items-center gap-1">
+                <Clock className="w-3.5 h-3.5" />
+                <span>
+                  {Math.floor(slippageState.cooldownRemainingSeconds / 60)}:
+                  {slippageState.cooldownRemainingSeconds % 60 < 10 ? '0' : ''}
+                  {slippageState.cooldownRemainingSeconds % 60} دقيقة متبقية
+                </span>
+              </span>
+            </div>
+            <p className="text-[11px] text-amber-200/90 leading-relaxed font-medium">
+              تم تجميد إرسال الإشارات تلقائياً (تليجرام والمتصفح والصوت) بسبب رصد حركة انزلاقية شاذة. بدأت مهلة تبريد لمدة 30 دقيقة لامتصاص الصدمة واستقرار دفتر الأوامر.
+            </p>
+            {slippageState.shortRestrictionReason && (
+              <div className="text-[11px] bg-amber-900/50 border border-amber-700/60 rounded p-1.5 text-amber-200">
+                {slippageState.shortRestrictionReason}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* Grid: Part 1 (Anti-Slippage) & Part 2 (Anti-Reversal) */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-3.5">
@@ -151,6 +206,69 @@ export const IntradayProtectionCard: React.FC<IntradayProtectionCardProps> = ({
               </div>
               <p className="text-[11px] text-slate-400 leading-relaxed">
                 {slippageGuard.tier1LiquidityFocus.note}
+              </p>
+            </div>
+
+            {/* Rule 5: Slippage Circuit Breaker & 30-Min Cooldown Guard */}
+            <div className={`p-2.5 rounded-lg border space-y-1.5 ${
+              slippageState.signalsPaused
+                ? 'bg-amber-950/40 border-amber-500/50 text-amber-200'
+                : 'bg-slate-900/90 border-slate-800'
+            }`}>
+              <div className="flex items-center justify-between text-slate-200 font-bold">
+                <span className={`flex items-center gap-1.5 ${slippageState.signalsPaused ? 'text-amber-400' : 'text-cyan-300'}`}>
+                  {slippageState.signalsPaused ? (
+                    <PauseCircle className="w-3.5 h-3.5 text-amber-400 animate-pulse" />
+                  ) : (
+                    <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
+                  )}
+                  <span>5. قاطع الانزلاقات وتبريد 30 دقيقة:</span>
+                </span>
+                <span className={`text-[10px] px-2 py-0.5 rounded font-mono font-black border ${
+                  slippageState.signalsPaused
+                    ? 'bg-amber-500/20 text-amber-300 border-amber-500/40'
+                    : 'bg-emerald-950 text-emerald-300 border-emerald-800'
+                }`}>
+                  {slippageState.signalsPaused
+                    ? `${Math.floor(slippageState.cooldownRemainingSeconds / 60)}:${slippageState.cooldownRemainingSeconds % 60 < 10 ? '0' : ''}${slippageState.cooldownRemainingSeconds % 60} تبريد نشط`
+                    : 'سيولة مستقرة ✓'}
+                </span>
+              </div>
+              <p className="text-[11px] text-slate-400 leading-relaxed">
+                {slippageState.signalsPaused ? slippageState.note : 'تجميد إرسال الإشارات تلقائياً أثناء أي انزلاق سعري شاذ ولمدة 30 دقيقة بعده لامتصاص الصدمة وحماية الحساب.'}
+              </p>
+              <div className="text-[10px] bg-slate-950/80 p-2 rounded border border-slate-800/80 space-y-1">
+                <div className="text-slate-300 font-bold flex items-center justify-between">
+                  <span>قواعد صفقات البيع (Short) في الانزلاق:</span>
+                  <span className={`text-[9px] px-1.5 py-0.2 rounded font-bold ${
+                    slippageState.shortAllowed ? 'bg-emerald-950 text-emerald-300' : 'bg-rose-950 text-rose-300'
+                  }`}>
+                    {slippageState.shortAllowed ? 'بيع مسموح بشرط الارتداد' : 'البيع محظور حالياً'}
+                  </span>
+                </div>
+                <div className="text-slate-400 leading-relaxed">
+                  {slippageState.signalsPaused ? (
+                    <span className="text-rose-400 font-medium">❌ محظور البيع أثناء الانزلاق وخلال الـ 30 دقيقة لتجنب فخ الارتداد العنيف (Short Squeeze).</span>
+                  ) : (
+                    <span className="text-emerald-400 font-medium">✓ بعد انتهاء التبريد، يدخل البيع فقط بعد كنس صاعد (PDH Sweep) أو ارتداد تصحيحي هادئ لمنطقة Premium / FVG.</span>
+                  )}
+                </div>
+              </div>
+            </div>
+
+            {/* Rule 6: Time-Based Stop & Holding Duration Expiration Guard */}
+            <div className="p-2.5 rounded-lg bg-slate-900/90 border border-slate-800 space-y-1">
+              <div className="flex items-center justify-between text-slate-200 font-bold">
+                <span className="flex items-center gap-1.5 text-cyan-300">
+                  <Clock className="w-3.5 h-3.5 text-sky-400" />
+                  <span>6. الوقف الزمني التلقائي (Time-Based Stop):</span>
+                </span>
+                <span className="text-[10px] bg-sky-950 text-sky-300 px-1.5 py-0.5 rounded border border-sky-800 font-bold">
+                  3.5 ساعات كحد أقصى ✓
+                </span>
+              </div>
+              <p className="text-[11px] text-slate-400 leading-relaxed">
+                إذا تجاوزت الصفقة 3.5 ساعات دون تحقيق الهدف أو كسر قمة جديدة، يتم تفعيل تنبيه الوقف الزمني وإغلاق الصفقة بسعر الدخول لتفادي تصفيات إغلاق الجلسة.
               </p>
             </div>
           </div>

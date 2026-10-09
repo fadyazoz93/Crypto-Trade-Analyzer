@@ -3,6 +3,7 @@ import { getStrategySettings } from './settingsStore';
 import { calculateSquareOfNineLevels, calculateGannTimeCycles, checkRsiDivergence, checkMacdSignal, getLatestAnchorPoints, findMajorPivots, checkWyckoffSignal, isTrendSlopeHealthy, calculateStructuralSL } from './gannGeometry';
 import { calculateVolumeProfile, calculateSessionVwap, detectSweepMssFvg } from './institutionalSmcEngine';
 import { fetchOkxCandles, fetchOkxTicker, fetchOkxTopVolumeTickers, toOkxInstId, fromOkxInstId } from './okxApi';
+import { slippageProtectionManager } from './slippageProtectionManager';
 
 /**
  * فلتر اتجاه وسلوك البتكوين (BTC Correlation Guard) - مستمد من منصة OKX
@@ -241,6 +242,22 @@ export function checkTradingTimeGuard(symbol?: string, now = new Date()): TimeGu
         nextSafeTime: '06:00 UTC (افتتاح جلسة لندن/آسيا النشطة)',
         sessionInfo,
       };
+    }
+
+    // 3. فلتر ركود منتصف النهار الأوروبي وما قبل افتتاح نيويورك (London Lunch & Pre-NY Lull: 11:30 - 12:45 UTC)
+    // يمنع التورط في التذبذب العشوائي الخادع على العملات البديلة في فترة فراغ السيولة بين ذروة لندن وبداية افتتاح نيويورك
+    if (settings.enableLondonLunchLullGuard !== false) {
+      const isLondonLunchLull = (utcHour === 11 && utcMinute >= 30) || (utcHour === 12 && utcMinute <= 45);
+      if (isLondonLunchLull) {
+        return {
+          isSafe: false,
+          windowName: 'فترة ركود منتصف النهار وفراغ السيولة (11:30 - 12:45 UTC)',
+          reason: `الوقت الحالي (${utcTimeStr}) يقع ضمن فترة ركود ما بين جلستي لندن ونيويورك (London Lunch Dead Zone). تكثر الذيول الخادعة وتجف السيولة المؤسسية على العملات البديلة قبل افتتاح نيويورك.`,
+          utcTime: utcTimeStr,
+          nextSafeTime: '13:00 UTC (افتتاح جلسة نيويورك الأمريكية النشطة)',
+          sessionInfo,
+        };
+      }
     }
   }
 
@@ -1209,6 +1226,22 @@ export function buildIntradayProtectionShield(
           ? `عمق دفتر أوامر ممتاز (OKX Tier-1 Orderbook). فروقات السعر والطلب شبه معدومة والسبريد محكم جداً لتقليل أي انزلاق.`
           : `ينصح بتداول أزواج الفئة الأولى كأولوية في التداول اليومي. السبريد مراقب بصرامة.`,
       },
+      slippageCooldownGuard: (() => {
+        const status = slippageProtectionManager.getStatus(symbol, price, sweepDetected && sweepType === 'PDH_SWEEP');
+        return {
+          isSlippageActive: status.isSlippageActive,
+          isCooldownActive: status.isCooldownActive,
+          cooldownRemainingSeconds: status.cooldownRemainingSeconds,
+          cooldownDurationMinutes: status.cooldownDurationMinutes,
+          cooldownExpiresAt: status.cooldownExpiresAt,
+          spikeType: status.spikeType,
+          signalsPaused: status.signalsPaused,
+          shortAllowed: status.shortAllowed,
+          shortRestrictionReason: status.shortRestrictionReason,
+          statusBadge: status.statusBadge,
+          note: status.note,
+        };
+      })(),
     },
 
     reversalGuard: {
@@ -1906,31 +1939,34 @@ export async function analyzeIntradayMarketData(symbol: string): Promise<Analysi
     : anchorSlLevel + (nAtrMultiplier * atr_15m);
 
   // Strict Directional Safety Guard for Stop Loss:
+  // في العملات البديلة يتم إعطاء هامش أمان لا يقل عن 2.6% أو 2.0x ATR لمنع الضرب العشوائي بالذيول
   const minSafeRiskDist = Math.max(
-    effectiveEntryPrice * (isAdaptiveAltcoin ? 0.018 : 0.008),
-    atr_15m * (isAdaptiveAltcoin ? 1.8 : 1.2)
+    effectiveEntryPrice * (isAdaptiveAltcoin ? 0.026 : 0.008),
+    atr_15m * (isAdaptiveAltcoin ? 2.0 : 1.2)
   );
   if (targetDir === 'BUY') {
     if (slCalculated >= effectiveEntryPrice - minSafeRiskDist) {
       slCalculated = effectiveEntryPrice - Math.max(
-        effectiveEntryPrice * (isAdaptiveAltcoin ? 0.022 : 0.010),
-        atr_15m * (isAdaptiveAltcoin ? 2.0 : 1.4)
+        effectiveEntryPrice * (isAdaptiveAltcoin ? 0.028 : 0.010),
+        atr_15m * (isAdaptiveAltcoin ? 2.2 : 1.4)
       );
     }
   } else {
     if (slCalculated <= effectiveEntryPrice + minSafeRiskDist) {
       slCalculated = effectiveEntryPrice + Math.max(
-        effectiveEntryPrice * (isAdaptiveAltcoin ? 0.022 : 0.010),
-        atr_15m * (isAdaptiveAltcoin ? 2.0 : 1.4)
+        effectiveEntryPrice * (isAdaptiveAltcoin ? 0.028 : 0.010),
+        atr_15m * (isAdaptiveAltcoin ? 2.2 : 1.4)
       );
     }
   }
 
   // سقف الوقف الأقصى لحماية الصفقات بالرافعة المالية (Max SL Cap Protection)
   if (settings.enableMaxSlCap !== false) {
-    const maxAllowedDistPct = settings.maxSlDistancePercent && settings.maxSlDistancePercent > 0
+    const baseCapPct = settings.maxSlDistancePercent && settings.maxSlDistancePercent > 0
       ? settings.maxSlDistancePercent
       : (isBtc ? 1.5 : 2.8);
+    // للعملات البديلة النشطة: نمنح مساحة تنفس صحية (حتى 3.5%) مع الحفاظ على الحماية من الانهيارات
+    const maxAllowedDistPct = isAdaptiveAltcoin ? Math.max(3.2, baseCapPct * 1.5) : baseCapPct;
     const maxRiskDistanceAllowed = effectiveEntryPrice * (maxAllowedDistPct / 100);
     const currentSlDist = Math.abs(effectiveEntryPrice - slCalculated);
     if (currentSlDist > maxRiskDistanceAllowed) {
@@ -2402,6 +2438,18 @@ export async function analyzeIntradayMarketData(symbol: string): Promise<Analysi
         decision = 'NO_TRADE';
         rejected_at_step = 'Falling Knife & Flash Dump Guard (درع السكاكين الهابطة على 5M)';
         reason = `⚠️ تم حجب الشراء بواسطة درع السكاكين الهابطة: السعر يشهد شمعة هبوط متسارعة أو هبوطاً متتالياً على فريم 5M دون امتصاص شرائي كافٍ. تجنب التقاط السكين الهابطة حتى يهدأ الزخم البيعي وتتشكل قاعدة سعرية مستقرة.`;
+        
+        // تسجيل حادثة انزلاق هابط وتفعيل مهلة التبريد 30 دقيقة
+        slippageProtectionManager.registerIncident(
+          symbol,
+          'FLASH_DUMP',
+          price,
+          last5mCandle.open,
+          last5mCandle.low,
+          'هبوط انزلاقي متسارع (Flash Dump) على فريم 5 دقائق. تم تفعيل قاطع الدائرة ومهلة التبريد 30 دقيقة.',
+          true,
+          settings.slippageCooldownMinutes || 30
+        );
       }
     } else if (decision === 'SELL') {
       const isCurrentPumping = last5mCandle.close > last5mCandle.open &&
@@ -2419,8 +2467,35 @@ export async function analyzeIntradayMarketData(symbol: string): Promise<Analysi
         decision = 'NO_TRADE';
         rejected_at_step = 'Flash Pump Squeeze Guard (درع الصعود الانفجاري على 5M)';
         reason = `⚠️ تم حجب البيع بواسطة درع الصعود الانفجاري: السعر يشهد شمعة صعود متسارعة على 5M دون ظهور ذيل رفض علوي. تجنب البيع في مواجهة الشموع الدافعة حتى تهدأ الحركة.`;
+        
+        // تسجيل حادثة انزلاق صاعد وتفعيل مهلة التبريد 30 دقيقة
+        slippageProtectionManager.registerIncident(
+          symbol,
+          'PUMP_SPIKE',
+          price,
+          last5mCandle.high,
+          last5mCandle.open,
+          'صعود انفجاري متسارع (Pump Squeeze) على فريم 5 دقائق. تم تفعيل قاطع الدائرة ومهلة التبريد 30 دقيقة.',
+          true,
+          settings.slippageCooldownMinutes || 30
+        );
       }
     }
+  }
+
+  // 6.b قاطع حماية الانزلاقات السعرية الشاذة ومهلة التبريد 30 دقيقة + فلتر صفقات البيع
+  const current15mCandle = data15m.candles && data15m.candles.length > 0 ? data15m.candles[data15m.candles.length - 1] : undefined;
+  const isPdhSweepDetected = Boolean(dailyMacroBias.prevDailyHigh > 0 && current15mCandle && current15mCandle.high >= dailyMacroBias.prevDailyHigh);
+  const slippageStatus = slippageProtectionManager.getStatus(symbol, price, isPdhSweepDetected);
+
+  if (settings.enableSlippageCooldownGuard !== false && slippageStatus.signalsPaused && (decision === 'BUY' || decision === 'SELL')) {
+    decision = 'NO_TRADE';
+    rejected_at_step = 'Slippage Circuit Breaker & 30-Min Cooldown (قاطع حماية الانزلاقات ومهلة التبريد 30 دقيقة)';
+    reason = slippageStatus.note;
+  } else if (decision === 'SELL' && !slippageStatus.shortAllowed) {
+    decision = 'NO_TRADE';
+    rejected_at_step = 'Short Re-Entry Validator (فلتر حظر بيع قاع الانزلاق)';
+    reason = slippageStatus.shortRestrictionReason || '⚠️ يمنع بيع قاع الانزلاق السعري دون ارتداد تصحيحي لمنطقة Premium لتفادي الارتداد الانفجاري.';
   }
 
   const timeGuard = checkTradingTimeGuard(symbol);
@@ -2624,6 +2699,17 @@ export async function analyzeIntradayMarketData(symbol: string): Promise<Analysi
     spreadGuard,
     sessionInfo: timeGuard.sessionInfo,
     intradayProtection,
+    slippageCooldownGuard: {
+      isSlippageActive: slippageStatus.isSlippageActive,
+      isCooldownActive: slippageStatus.isCooldownActive,
+      cooldownRemainingSeconds: slippageStatus.cooldownRemainingSeconds,
+      cooldownDurationMinutes: slippageStatus.cooldownDurationMinutes,
+      cooldownExpiresAt: slippageStatus.cooldownExpiresAt,
+      signalsPaused: slippageStatus.signalsPaused,
+      shortAllowed: slippageStatus.shortAllowed,
+      shortRestrictionReason: slippageStatus.shortRestrictionReason,
+      note: slippageStatus.note,
+    },
     tradingMode: 'INTRADAY',
     volumeProfile,
     sessionVwap,
@@ -3349,10 +3435,36 @@ export async function analyzeScalpMarketData(symbol: string): Promise<AnalysisRe
 
   // 2. قاطع الدائرة للأخبار والانزلاقات السعرية الشاذة (Circuit Breaker Guard)
   const circuitBreaker = checkNewsVolatilitySpikeGuard(data1m.candles, volumes1m, atr_1m);
-  if (circuitBreaker.isSpikeActive && (decision === 'BUY' || decision === 'SELL')) {
+  if (circuitBreaker.isSpikeActive) {
+    const last1m = data1m.candles && data1m.candles.length > 0 ? data1m.candles[data1m.candles.length - 1] : undefined;
+    slippageProtectionManager.registerIncident(
+      symbol,
+      last1m && last1m.close < last1m.open ? 'FLASH_DUMP' : 'PUMP_SPIKE',
+      price,
+      last1m ? last1m.high : price,
+      last1m ? last1m.low : price,
+      circuitBreaker.spikeReason || 'انزلاق سعري شاذ (News Spike)',
+      true,
+      settings.slippageCooldownMinutes || 30
+    );
+
+    if (decision === 'BUY' || decision === 'SELL') {
+      decision = 'NO_TRADE';
+      rejected_at_step = 'News Volatility Spike Guard (قاطع الدائرة للانزلاقات السعرية)';
+      reason = circuitBreaker.spikeReason || '⚠️ تم حجب الدخول بواسطة قاطع الدائرة لتجنب الانزلاق السعري في شمعة خبر شاذة.';
+    }
+  }
+
+  // 2.b قاطع حماية الانزلاقات السعرية ومهلة التبريد 30 دقيقة
+  const scalpSlippageStatus = slippageProtectionManager.getStatus(symbol, price);
+  if (settings.enableSlippageCooldownGuard !== false && scalpSlippageStatus.signalsPaused && (decision === 'BUY' || decision === 'SELL')) {
     decision = 'NO_TRADE';
-    rejected_at_step = 'News Volatility Spike Guard (قاطع الدائرة للانزلاقات السعرية)';
-    reason = circuitBreaker.spikeReason || '⚠️ تم حجب الدخول بواسطة قاطع الدائرة لتجنب الانزلاق السعري في شمعة خبر شاذة.';
+    rejected_at_step = 'Slippage Circuit Breaker & 30-Min Cooldown (قاطع حماية الانزلاقات ومهلة التبريد 30 دقيقة)';
+    reason = scalpSlippageStatus.note;
+  } else if (decision === 'SELL' && !scalpSlippageStatus.shortAllowed) {
+    decision = 'NO_TRADE';
+    rejected_at_step = 'Short Re-Entry Validator (فلتر حظر بيع قاع الانزلاق)';
+    reason = scalpSlippageStatus.shortRestrictionReason || '⚠️ يمنع بيع قاع الانزلاق السعري دون ارتداد تصحيحي لمنطقة Premium.';
   }
 
   const timeGuard = checkTradingTimeGuard();
@@ -3503,6 +3615,17 @@ export async function analyzeScalpMarketData(symbol: string): Promise<AnalysisRe
       volumeMultiplier: circuitBreaker.volumeMultiplier,
       rangeMultiplier: circuitBreaker.rangeMultiplier,
       message: circuitBreaker.spikeReason,
+    },
+    slippageCooldownGuard: {
+      isSlippageActive: scalpSlippageStatus.isSlippageActive,
+      isCooldownActive: scalpSlippageStatus.isCooldownActive,
+      cooldownRemainingSeconds: scalpSlippageStatus.cooldownRemainingSeconds,
+      cooldownDurationMinutes: scalpSlippageStatus.cooldownDurationMinutes,
+      cooldownExpiresAt: scalpSlippageStatus.cooldownExpiresAt,
+      signalsPaused: scalpSlippageStatus.signalsPaused,
+      shortAllowed: scalpSlippageStatus.shortAllowed,
+      shortRestrictionReason: scalpSlippageStatus.shortRestrictionReason,
+      note: scalpSlippageStatus.note,
     },
     trade_setup,
     candles15m: data15m.candles,

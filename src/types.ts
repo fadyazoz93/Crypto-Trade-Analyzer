@@ -342,6 +342,19 @@ export interface IntradayProtectionShield {
       orderbookQuality: 'HIGH_LIQUIDITY' | 'MEDIUM_LIQUIDITY' | 'THIN_ORDERBOOK_WARN';
       note: string;
     };
+    slippageCooldownGuard?: {
+      isSlippageActive: boolean;
+      isCooldownActive: boolean;
+      cooldownRemainingSeconds: number;
+      cooldownDurationMinutes: number;
+      cooldownExpiresAt?: number;
+      spikeType?: 'FLASH_DUMP' | 'PUMP_SPIKE' | 'EXTREME_ATR_EXPANSION' | 'ORDERBOOK_VOID';
+      signalsPaused: boolean;
+      shortAllowed: boolean;
+      shortRestrictionReason?: string;
+      statusBadge: string;
+      note: string;
+    };
   };
 
   // ثانياً: تفادي الانعكاسات المفاجئة (Trend Reversal Prevention)
@@ -677,6 +690,17 @@ export interface AnalysisResult {
     volumeMultiplier: number;
     rangeMultiplier: number;
     message?: string;
+  };
+  slippageCooldownGuard?: {
+    isSlippageActive: boolean;
+    isCooldownActive: boolean;
+    cooldownRemainingSeconds: number;
+    cooldownDurationMinutes: number;
+    cooldownExpiresAt?: number;
+    signalsPaused: boolean;
+    shortAllowed: boolean;
+    shortRestrictionReason?: string;
+    note: string;
   };
 }
 

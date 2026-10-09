@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { ShieldCheck, ShieldAlert, Shield, Zap, TrendingUp, TrendingDown, DollarSign, Activity, AlertTriangle, Lock, Award, Clock, ChevronDown, ChevronUp, RefreshCw } from 'lucide-react';
 import { getPaperPortfolio, checkCircuitBreakersStatus, CircuitBreakerState, PaperPortfolio } from '../utils/paperTradingStore';
 import { getStrategySettings } from '../utils/settingsStore';
+import { slippageProtectionManager } from '../utils/slippageProtectionManager';
 
 interface OnChartHUDProps {
   portfolio?: PaperPortfolio;
@@ -52,6 +53,19 @@ export const OnChartHUD: React.FC<OnChartHUDProps> = ({
 
   const activePortfolio = propPortfolio || internalPortfolio;
   const circuitState: CircuitBreakerState = checkCircuitBreakersStatus(activePortfolio, selectedSymbol);
+
+  const [slippageState, setSlippageState] = useState(() => slippageProtectionManager.getStatus(selectedSymbol));
+
+  useEffect(() => {
+    const update = () => setSlippageState(slippageProtectionManager.getStatus(selectedSymbol));
+    update();
+    const interval = setInterval(update, 1000);
+    window.addEventListener('slippage-protection-updated', update);
+    return () => {
+      clearInterval(interval);
+      window.removeEventListener('slippage-protection-updated', update);
+    };
+  }, [selectedSymbol]);
 
   const isProfit = circuitState.todayNetPnlUsdt >= 0;
   const targetPercent = settings.dailyTargetLockPercent || 15.0;
@@ -130,6 +144,25 @@ export const OnChartHUD: React.FC<OnChartHUDProps> = ({
           </button>
         </div>
       </div>
+
+      {/* Slippage Circuit Breaker Active Warning Banner */}
+      {slippageState.signalsPaused && (
+        <div className="bg-amber-950/90 border-b border-amber-600/60 px-4 py-2 flex flex-wrap items-center justify-between gap-2 text-xs text-amber-200">
+          <div className="flex items-center gap-2">
+            <span className="w-2.5 h-2.5 rounded-full bg-amber-400 animate-ping" />
+            <span className="font-bold text-amber-300">قاطع حماية الانزلاقات مفعل: تجميد الإشارات مؤقتاً</span>
+            <span className="text-[11px] text-amber-300/80 hidden sm:inline">(لتفادي انزلاق السبريد وجفاف دفتر الأوامر)</span>
+          </div>
+          <div className="font-mono font-black text-xs bg-amber-900/80 text-amber-200 px-2.5 py-0.5 rounded border border-amber-700/80 flex items-center gap-1.5">
+            <Clock className="w-3.5 h-3.5 text-amber-300" />
+            <span>
+              {Math.floor(slippageState.cooldownRemainingSeconds / 60)}:
+              {slippageState.cooldownRemainingSeconds % 60 < 10 ? '0' : ''}
+              {slippageState.cooldownRemainingSeconds % 60} دقيقة تبريد
+            </span>
+          </div>
+        </div>
+      )}
 
       {/* Expanded Metrics Box */}
       {isExpanded && (
